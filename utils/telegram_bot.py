@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Telegram Bot for Gaussian Channel Alerts with Chart Links
+Telegram Bot for Gaussian Channel Alerts with Batched Messages
 """
 
 import os
 import requests
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
+import pytz
 
 class TelegramBot:
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
@@ -75,72 +77,136 @@ class TelegramBot:
         
         return tv_url, cg_url
     
-    def format_30m_alert(self, alert: dict, timeframe_minutes: int = 30) -> str:
+    def _get_ist_time(self) -> str:
+        """Get current time in IST format (HH:MM:SS IST)"""
+        try:
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            return now.strftime('%I:%M:%S %p IST')
+        except:
+            # Fallback if pytz not available
+            return datetime.now().strftime('%I:%M:%S %p IST')
+    
+    def format_batch_alert(self, alerts: List[dict], timeframe_minutes: int = 30) -> str:
         """
-        Format 30-minute alert message with chart links
+        Format multiple alerts into single batched message
         
         Args:
-            alert: Alert dictionary
-            timeframe_minutes: Timeframe in minutes (default 30, test uses 15)
+            alerts: List of alert dictionaries
+            timeframe_minutes: Timeframe in minutes (15, 30, 240)
+        
+        Returns:
+            Formatted batch message
         """
-        symbol = alert['symbol']
-        alert_type = alert['type']
-        close = alert['close']
-        upper = alert['upper_band']
-        lower = alert['lower_band']
-        direction = alert['direction']
+        if not alerts:
+            return ""
         
-        emoji = "🔥" if direction == "BULLISH" else "❄️"
+        # Separate bullish and bearish
+        bullish_alerts = [a for a in alerts if a.get('direction') == 'BULLISH']
+        bearish_alerts = [a for a in alerts if a.get('direction') == 'BEARISH']
         
-        # Get chart links
-        tv_url, cg_url = self._get_chart_links(symbol, timeframe_minutes)
+        total_signals = len(alerts)
+        bullish_count = len(bullish_alerts)
+        bearish_count = len(bearish_alerts)
         
-        message = f"""
-{emoji} <b>Gaussian Channel Alert [{timeframe_minutes}m]</b>
-
-<b>Symbol:</b> {symbol}
-<b>Type:</b> {alert_type.replace('_', ' ')}
-<b>Direction:</b> {direction}
-
-<b>Price:</b> ${close:.8f}
-<b>Upper Band:</b> ${upper:.8f}
-<b>Lower Band:</b> ${lower:.8f}
-
-<i>The candle body has crossed the {alert_type.replace('_', ' ').lower()}</i>
-
-📊 <a href="{tv_url}">TradingView Chart</a>
-🔥 <a href="{cg_url}">Coinglass Heatmap</a>
-"""
-        return message.strip()
+        # Timeframe label
+        if timeframe_minutes == 15:
+            tf_label = "15M"
+        elif timeframe_minutes == 30:
+            tf_label = "30M"
+        elif timeframe_minutes == 240:
+            tf_label = "4H"
+        else:
+            tf_label = f"{timeframe_minutes}M"
+        
+        # Get IST time
+        ist_time = self._get_ist_time()
+        
+        # Build message
+        message = f"📊 <b>{total_signals} Gaussian Channel Signal{'s' if total_signals > 1 else ''} Detected</b>\n\n"
+        message += f"🕐 {ist_time}\n"
+        message += f"⏰ {tf_label} Primary\n\n"
+        
+        # Bullish section
+        if bullish_alerts:
+            message += "🟢 <b>Gaussian Channel - BULLISH</b>\n"
+            message += "──────────────────────────────\n"
+            
+            for i, alert in enumerate(bullish_alerts, 1):
+                symbol = alert['symbol'].replace('USDT', '')
+                alert_type = alert['type']
+                price = alert['close']
+                
+                # Determine which band was crossed
+                if 'UPPER' in alert_type:
+                    band_text = "Crossed above Upper Band"
+                    band_value = alert['upper_band']
+                elif 'LOWER' in alert_type:
+                    band_text = "Crossed above Lower Band"
+                    band_value = alert['lower_band']
+                elif 'BOTH' in alert_type:
+                    band_text = "Crossed both bands"
+                    band_value = alert['upper_band']
+                else:
+                    band_text = "Band cross detected"
+                    band_value = alert.get('upper_band', price)
+                
+                # Get chart links
+                tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
+                
+                message += f"{i}. <b>{symbol}</b>\n"
+                message += f"   {band_text}\n"
+                message += f"   Price: ${price:,.8f}\n"
+                message += f"   Band: ${band_value:,.8f}\n"
+                message += f"   📈 <a href='{tv_url}'>Chart</a> | 🔥 <a href='{cg_url}'>Liq Heat</a>\n\n"
+        
+        # Bearish section
+        if bearish_alerts:
+            message += "🔴 <b>Gaussian Channel - BEARISH</b>\n"
+            message += "──────────────────────────────\n"
+            
+            for i, alert in enumerate(bearish_alerts, 1):
+                symbol = alert['symbol'].replace('USDT', '')
+                alert_type = alert['type']
+                price = alert['close']
+                
+                # Determine which band was crossed
+                if 'LOWER' in alert_type:
+                    band_text = "Crossed below Lower Band"
+                    band_value = alert['lower_band']
+                elif 'UPPER' in alert_type:
+                    band_text = "Crossed below Upper Band"
+                    band_value = alert['upper_band']
+                elif 'BOTH' in alert_type:
+                    band_text = "Crossed both bands"
+                    band_value = alert['lower_band']
+                else:
+                    band_text = "Band cross detected"
+                    band_value = alert.get('lower_band', price)
+                
+                # Get chart links
+                tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
+                
+                message += f"{i}. <b>{symbol}</b>\n"
+                message += f"   {band_text}\n"
+                message += f"   Price: ${price:,.8f}\n"
+                message += f"   Band: ${band_value:,.8f}\n"
+                message += f"   📈 <a href='{tv_url}'>Chart</a> | 🔥 <a href='{cg_url}'>Liq Heat</a>\n\n"
+        
+        # Summary
+        message += "📊 <b>Gaussian Channel Signal Summary</b>\n"
+        message += f"• Total Bullish Signals: {bullish_count}\n"
+        message += f"• Total Bearish Signals: {bearish_count}"
+        
+        return message
+    
+    def format_30m_alert(self, alert: dict, timeframe_minutes: int = 30) -> str:
+        """
+        Format single 30-minute alert (backward compatibility)
+        Use format_batch_alert for multiple alerts
+        """
+        return self.format_batch_alert([alert], timeframe_minutes)
     
     def format_4h_alert(self, alert: dict) -> str:
-        """Format 4-hour alert message with chart links"""
-        symbol = alert['symbol']
-        crossed_lines = alert['crossed_lines']
-        close = alert['close']
-        filter_line = alert['filter']
-        upper = alert['upper_band']
-        lower = alert['lower_band']
-        
-        lines_text = ", ".join([line.replace('_', ' ') for line in crossed_lines])
-        
-        # Get chart links (4h = 240 minutes)
-        tv_url, cg_url = self._get_chart_links(symbol, 240)
-        
-        message = f"""
-📊 <b>Gaussian Channel Alert [4h]</b>
-
-<b>Symbol:</b> {symbol}
-<b>Crossed:</b> {lines_text}
-
-<b>Price:</b> ${close:.8f}
-<b>Filter:</b> ${filter_line:.8f}
-<b>Upper Band:</b> ${upper:.8f}
-<b>Lower Band:</b> ${lower:.8f}
-
-<i>The candle body crossed {len(crossed_lines)} line(s)</i>
-
-📊 <a href="{tv_url}">TradingView Chart</a>
-🔥 <a href="{cg_url}">Coinglass Heatmap</a>
-"""
-        return message.strip()
+        """Format single 4-hour alert (backward compatibility)"""
+        return self.format_batch_alert([alert], timeframe_minutes=240)
