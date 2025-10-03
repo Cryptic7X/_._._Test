@@ -1,52 +1,52 @@
+#!/usr/bin/env python3
 """
 Simple Exchange Layer - BingX + Public API Fallbacks
 Supports: 15m, 30m, 1h, 2h, 4h, 8h
+Standalone version - no config files required
 """
+
 import os
 import json
 import time
 import requests
-import yaml
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, Dict, Any
 
 class SimpleExchangeManager:
     def __init__(self):
-        self.config = self.load_config()
+        """Initialize exchange manager without config files"""
         self.symbol_mapping = self.load_symbol_mapping()
         self.session = self.create_session()
-
-    def load_config(self):
-        config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'config.yaml')
-        with open(config_path) as f:
-            return yaml.safe_load(f)
-
-    def load_symbol_mapping(self):
-        mapping_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'symbol_mapping.json')
+    
+    def load_symbol_mapping(self) -> Dict:
+        """Load symbol mapping from config/symbol_mapping.json (optional)"""
+        mapping_path = os.path.join(os.path.dirname(__file__), 'config', 'symbol_mapping.json')
         try:
             with open(mapping_path) as f:
                 return json.load(f)
         except FileNotFoundError:
             return {}
-
+    
     def create_session(self):
+        """Create HTTP session with headers"""
         session = requests.Session()
         session.headers.update({
-            'User-Agent': 'Multi-Indicator-Exchange/3.0',
+            'User-Agent': 'Gaussian-Channel-Alert-System/1.0',
             'Accept': 'application/json'
         })
         return session
-
+    
     def apply_symbol_mapping(self, symbol: str) -> Tuple[str, str]:
         """Apply custom symbol mappings"""
         api_symbol = self.symbol_mapping.get(symbol, symbol)
         return api_symbol, symbol
-
+    
     def get_supported_timeframes(self) -> list:
+        """Return supported timeframes"""
         return ['15m', '30m', '1h', '2h', '4h', '8h']
-
+    
     def fetch_bingx_perpetuals_data(self, symbol: str, timeframe: str, limit: int = 200) -> Optional[Dict]:
-        """BingX Perpetuals OHLCV"""
+        """Fetch BingX Perpetuals OHLCV data"""
         try:
             interval_map = {
                 '15m': '15m',
@@ -59,18 +59,18 @@ class SimpleExchangeManager:
             
             if timeframe not in interval_map:
                 return None
-
+            
             url = "https://open-api.bingx.com/openApi/swap/v3/quote/klines"
             params = {
                 'symbol': f"{symbol.replace('USDT', '')}-USDT",
                 'interval': interval_map[timeframe],
                 'limit': limit
             }
-
+            
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-
+            
             if data.get('code') == 0 and 'data' in data:
                 candles = data['data']
                 return {
@@ -84,9 +84,9 @@ class SimpleExchangeManager:
         except:
             pass
         return None
-
+    
     def fetch_bingx_spot_data(self, symbol: str, timeframe: str, limit: int = 200) -> Optional[Dict]:
-        """BingX Spot OHLCV"""
+        """Fetch BingX Spot OHLCV data"""
         try:
             interval_map = {
                 '15m': '15m',
@@ -99,18 +99,18 @@ class SimpleExchangeManager:
             
             if timeframe not in interval_map:
                 return None
-
+            
             url = "https://open-api.bingx.com/openApi/spot/v1/market/kline"
             params = {
                 'symbol': f"{symbol.replace('USDT', '')}-USDT",
                 'interval': interval_map[timeframe],
                 'limit': limit
             }
-
+            
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-
+            
             if data.get('code') == 0 and 'data' in data:
                 candles = data['data']
                 return {
@@ -124,9 +124,9 @@ class SimpleExchangeManager:
         except:
             pass
         return None
-
+    
     def fetch_kucoin_data(self, symbol: str, timeframe: str, limit: int = 200) -> Optional[Dict]:
-        """KuCoin OHLCV (Public)"""
+        """Fetch KuCoin OHLCV data (Public API)"""
         try:
             interval_map = {
                 '15m': '15min',
@@ -139,7 +139,7 @@ class SimpleExchangeManager:
             
             if timeframe not in interval_map:
                 return None
-
+            
             timeframe_minutes = {
                 '15m': 15,
                 '30m': 30,
@@ -148,10 +148,10 @@ class SimpleExchangeManager:
                 '4h': 240,
                 '8h': 480
             }
-
+            
             end_time = int(time.time())
             start_time = end_time - (limit * timeframe_minutes[timeframe] * 60)
-
+            
             url = "https://api.kucoin.com/api/v1/market/candles"
             params = {
                 'symbol': symbol,
@@ -159,11 +159,11 @@ class SimpleExchangeManager:
                 'startAt': start_time,
                 'endAt': end_time
             }
-
+            
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-
+            
             if data.get('code') == '200000' and 'data' in data:
                 candles = sorted(data['data'], key=lambda x: int(x[0]))
                 return {
@@ -177,9 +177,9 @@ class SimpleExchangeManager:
         except:
             pass
         return None
-
+    
     def fetch_okx_data(self, symbol: str, timeframe: str, limit: int = 200) -> Optional[Dict]:
-        """OKX OHLCV (Public)"""
+        """Fetch OKX OHLCV data (Public API)"""
         try:
             interval_map = {
                 '15m': '15m',
@@ -192,18 +192,18 @@ class SimpleExchangeManager:
             
             if timeframe not in interval_map:
                 return None
-
+            
             url = "https://www.okx.com/api/v5/market/candles"
             params = {
                 'instId': symbol.replace('USDT', '-USDT'),
                 'bar': interval_map[timeframe],
                 'limit': limit
             }
-
+            
             response = self.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-
+            
             if data.get('code') == '0' and 'data' in data:
                 candles = sorted(data['data'], key=lambda x: int(x[0]))
                 return {
@@ -217,28 +217,42 @@ class SimpleExchangeManager:
         except:
             pass
         return None
-
+    
     def fetch_ohlcv_with_fallback(self, symbol: str, timeframe: str, limit: int = 200) -> Tuple[Optional[Dict], Optional[str]]:
-        """Fetch with multi-exchange fallback"""
+        """
+        Fetch OHLCV data with multi-exchange fallback
+        
+        Args:
+            symbol: Trading pair (e.g., BTCUSDT)
+            timeframe: Timeframe (15m, 30m, 1h, 2h, 4h, 8h)
+            limit: Number of candles to fetch
+        
+        Returns:
+            Tuple of (data_dict, source_name)
+        """
         if timeframe not in self.get_supported_timeframes():
             return None, None
-
+        
         api_symbol, display_symbol = self.apply_symbol_mapping(symbol)
-
+        
+        # Try BingX Perpetuals first
         data = self.fetch_bingx_perpetuals_data(api_symbol, timeframe, limit)
         if data and len(data.get('timestamp', [])) > 0:
             return data, 'BingX Perpetuals'
-
+        
+        # Try BingX Spot
         data = self.fetch_bingx_spot_data(api_symbol, timeframe, limit)
         if data and len(data.get('timestamp', [])) > 0:
             return data, 'BingX Spot'
-
+        
+        # Try KuCoin
         data = self.fetch_kucoin_data(api_symbol, timeframe, limit)
         if data and len(data.get('timestamp', [])) > 0:
             return data, 'KuCoin'
-
+        
+        # Try OKX
         data = self.fetch_okx_data(api_symbol, timeframe, limit)
         if data and len(data.get('timestamp', [])) > 0:
             return data, 'OKX'
-
+        
         return None, None
