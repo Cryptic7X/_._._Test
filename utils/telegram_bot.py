@@ -6,8 +6,7 @@ Telegram Bot for Gaussian Channel Alerts with Batched Messages
 import os
 import requests
 from typing import Optional, List
-from datetime import datetime
-import pytz
+from datetime import datetime, timedelta
 
 class TelegramBot:
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
@@ -78,14 +77,11 @@ class TelegramBot:
         return tv_url, cg_url
     
     def _get_ist_time(self) -> str:
-        """Get current time in IST format (HH:MM:SS IST)"""
-        try:
-            ist = pytz.timezone('Asia/Kolkata')
-            now = datetime.now(ist)
-            return now.strftime('%I:%M:%S %p IST')
-        except:
-            # Fallback if pytz not available
-            return datetime.now().strftime('%I:%M:%S %p IST')
+        """Get current time in IST format (HH:MM:SS IST) - UTC+5:30"""
+        # Convert UTC to IST (UTC + 5 hours 30 minutes)
+        utc_now = datetime.utcnow()
+        ist_now = utc_now + timedelta(hours=5, minutes=30)
+        return ist_now.strftime('%I:%M:%S %p IST')
     
     def format_batch_alert(self, alerts: List[dict], timeframe_minutes: int = 30) -> str:
         """
@@ -124,7 +120,7 @@ class TelegramBot:
         
         # Build message
         message = f"📊 <b>{total_signals} Gaussian Channel Signal{'s' if total_signals > 1 else ''} Detected</b>\n\n"
-        message += f"🕐 {ist_time}\n"
+        message += f"🕐 {ist_time}\n\n"
         message += f"⏰ {tf_label} Primary\n\n"
         
         # Bullish section
@@ -156,8 +152,8 @@ class TelegramBot:
                 
                 message += f"{i}. <b>{symbol}</b>\n"
                 message += f"   {band_text}\n"
-                message += f"   Price: ${price:,.8f}\n"
-                message += f"   Band: ${band_value:,.8f}\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   Band: ${band_value:,.2f}\n"
                 message += f"   📈 <a href='{tv_url}'>Chart</a> | 🔥 <a href='{cg_url}'>Liq Heat</a>\n\n"
         
         # Bearish section
@@ -189,8 +185,8 @@ class TelegramBot:
                 
                 message += f"{i}. <b>{symbol}</b>\n"
                 message += f"   {band_text}\n"
-                message += f"   Price: ${price:,.8f}\n"
-                message += f"   Band: ${band_value:,.8f}\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   Band: ${band_value:,.2f}\n"
                 message += f"   📈 <a href='{tv_url}'>Chart</a> | 🔥 <a href='{cg_url}'>Liq Heat</a>\n\n"
         
         # Summary
