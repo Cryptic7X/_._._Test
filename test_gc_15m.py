@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Gaussian Channel 15-Minute Test Runner
-Tests 30m analysis logic on 15m timeframe with real Telegram alerts
+Tests 30m analysis logic on 15m timeframe with batched Telegram alerts
 """
 
 import os
@@ -34,6 +34,9 @@ class GaussianTest15m:
         )
         self.detector = BandCrossDetector(state_file='cache/gc_test_15m_state.json')
         self.telegram = TelegramBot()
+        
+        # Store all alerts for batching
+        self.batch_alerts = []
         
         print("🚀 Gaussian Channel 15m Test System Initialized")
         print(f"📊 Parameters: Poles={self.gaussian.poles}, Period={self.gaussian.period}, Multiplier={self.gaussian.multiplier}")
@@ -138,14 +141,8 @@ class GaussianTest15m:
             if alert:
                 print(f"🔔 {symbol}: {alert['type']} - {alert['direction']}")
                 
-                # Send Telegram alert (pass timeframe_minutes=15 for test)
-                message = self.telegram.format_30m_alert(alert, timeframe_minutes=15)
-                success = self.telegram.send_message(message)
-                
-                if success:
-                    print(f"✅ Alert sent to Telegram")
-                else:
-                    print(f"❌ Failed to send Telegram alert")
+                # Add to batch instead of sending immediately
+                self.batch_alerts.append(alert)
                 
                 # Log alert to file
                 self._log_alert(alert)
@@ -169,6 +166,23 @@ class GaussianTest15m:
             json.dump(alert, f)
             f.write('\n')
     
+    def send_batch_alerts(self):
+        """Send all collected alerts as one message"""
+        if not self.batch_alerts:
+            print("ℹ️ No alerts to send")
+            return
+        
+        print(f"\n📤 Sending {len(self.batch_alerts)} alert(s) in batch...")
+        
+        # Format and send batch message
+        message = self.telegram.format_batch_alert(self.batch_alerts, timeframe_minutes=15)
+        success = self.telegram.send_message(message)
+        
+        if success:
+            print(f"✅ Batch alert sent to Telegram ({len(self.batch_alerts)} signals)")
+        else:
+            print(f"❌ Failed to send batch alert to Telegram")
+    
     def run(self):
         """Run 15m test analysis"""
         print("\n" + "="*60)
@@ -183,10 +197,9 @@ class GaussianTest15m:
             return
         
         print(f"📊 Analyzing {len(coins)} coins on 15-minute timeframe...")
-        print(f"🔔 Alerts will be sent to Telegram\n")
+        print(f"🔔 Alerts will be batched and sent to Telegram\n")
         
         success_count = 0
-        alert_count = 0
         
         for i, symbol in enumerate(coins, 1):
             print(f"\n[{i}/{len(coins)}] {symbol}")
@@ -196,7 +209,10 @@ class GaussianTest15m:
         
         print("\n" + "="*60)
         print(f"✅ Analysis complete: {success_count}/{len(coins)} coins processed")
-        print("="*60)
+        print("="*60 + "\n")
+        
+        # Send batch alerts after all analysis is complete
+        self.send_batch_alerts()
 
 def main():
     """Main entry point"""
