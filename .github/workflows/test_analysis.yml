@@ -1,6 +1,9 @@
 name: Test Crypto Analysis
 
 on:
+  schedule:
+    # Run every 30 minutes at :02 and :32
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
