@@ -13,7 +13,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -42,7 +42,7 @@ jobs:
         run: python test_gc_15m.py
       
       - name: Upload state file
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gc-state-15m
@@ -50,7 +50,7 @@ jobs:
           retention-days: 30
       
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gc-logs-15m
