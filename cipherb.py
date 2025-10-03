@@ -15,6 +15,7 @@ def detect_exact_cipherb_signals(df, config=None):
     obLevel2 = 60
     
     hlc3 = (df['high'] + df['low'] + df['close']) / 3
+    
     esa = ema(hlc3, wtChannelLen)
     de = ema(abs(hlc3 - esa), wtChannelLen)
     ci = (hlc3 - esa) / (0.015 * de)
