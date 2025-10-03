@@ -13,7 +13,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -25,15 +25,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy requests pyyaml
       
-      - name: Create cache directory
-        run: mkdir -p cache logs config
-      
-      - name: Download state file
-        continue-on-error: true
+      - name: Create required directories
         run: |
-          if [ -f cache/gc_test_15m_state.json ]; then
-            echo "State file exists"
+          mkdir -p cache logs config
+      
+      - name: Create default coins.txt if missing
+        run: |
+          if [ ! -f config/coins.txt ]; then
+            echo "BTC" > config/coins.txt
+            echo "ETH" >> config/coins.txt
+            echo "SOL" >> config/coins.txt
+            echo "XRP" >> config/coins.txt
+            echo "DOGE" >> config/coins.txt
           fi
+      
+      - name: Download previous state
+        continue-on-error: true
+        uses: actions/download-artifact@v3
+        with:
+          name: gc-state-15m
+          path: cache/
       
       - name: Run Gaussian Channel 15m Test
         env:
@@ -42,7 +53,7 @@ jobs:
         run: python test_gc_15m.py
       
       - name: Upload state file
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         if: always()
         with:
           name: gc-state-15m
@@ -50,7 +61,7 @@ jobs:
           retention-days: 30
       
       - name: Upload logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         if: always()
         with:
           name: gc-logs-15m
