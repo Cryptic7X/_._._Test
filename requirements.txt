@@ -1,6 +1,2 @@
 pandas
-numpy
 requests
-ccxt
-python-dateutil
-PyYAML
