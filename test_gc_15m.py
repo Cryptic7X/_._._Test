@@ -17,8 +17,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from indicators.gaussian_channel import GaussianChannel
 from indicators.band_detector import BandCrossDetector
 from utils.telegram_bot import TelegramBot
-
-# Import existing exchange manager
 from simple_exchange import SimpleExchangeManager
 
 class GaussianTest15m:
@@ -47,20 +45,34 @@ class GaussianTest15m:
         
         if not os.path.exists(coins_file):
             print(f"❌ {coins_file} not found!")
+            print(f"📝 Please create config/coins.txt with your coin list")
             return []
         
         coins = []
+        
         with open(coins_file, 'r', encoding='utf-8') as f:
             for line in f:
                 coin = line.strip().upper()
-                if coin and not coin.startswith('#'):
-                    coins.append(coin)
+                
+                # Skip empty lines and comments
+                if not coin or coin.startswith('#'):
+                    continue
+                
+                coins.append(coin)
         
         print(f"📋 Loaded {len(coins)} coins from coins.txt")
         return coins
     
     def analyze_coin(self, symbol: str) -> bool:
-        """Analyze single coin for band crosses"""
+        """
+        Analyze single coin for band crosses
+        
+        Args:
+            symbol: Coin symbol (e.g., BTCUSDT)
+        
+        Returns:
+            True if analysis successful, False otherwise
+        """
         try:
             # Fetch 15m OHLCV data
             data, source = self.exchange.fetch_ohlcv_with_fallback(symbol, '15m', limit=200)
@@ -89,7 +101,7 @@ class GaussianTest15m:
             candle_lower = lower_band[idx]
             candle_time = timestamps[idx]
             
-            # Detect band cross - PASS ALL ARGUMENTS
+            # Detect band cross with ALL required parameters
             alert = self.detector.detect_30m_cross(
                 symbol=symbol,
                 open_price=candle_open,
@@ -105,20 +117,20 @@ class GaussianTest15m:
                 cross_method = alert.get('cross_method', 'BODY')
                 print(f"🔔 {symbol}: {alert['type']} ({cross_method}) - {alert['direction']}")
                 
-                # Add to batch
+                # Add to batch instead of sending immediately
                 self.batch_alerts.append(alert)
                 
-                # Log alert
+                # Log alert to file
                 self._log_alert(alert)
                 
                 return True
             else:
-                print(f"✓ {symbol}: No cross")
+                print(f"✓ {symbol}: No band cross detected")
             
             return True
             
         except Exception as e:
-            print(f"❌ {symbol}: {e}")
+            print(f"❌ {symbol}: Error - {e}")
             return False
     
     def _log_alert(self, alert: dict):
