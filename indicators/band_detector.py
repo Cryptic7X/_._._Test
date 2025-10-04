@@ -58,7 +58,7 @@ class BandCrossDetector:
         # Check if this candle is fresh (within last 30 minutes)
         time_diff_minutes = (self.current_run_time - timestamp) / 1000 / 60
         
-        if time_diff_minutes > 35:  # Allow 5 min buffer
+        if time_diff_minutes > 65:  # Allow 5 min buffer
             # Skip old candles
             return None
         
