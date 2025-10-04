@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Band Cross Detector - Accurate Wick-then-Body Cross Logic
-Checks wicks first, if absent, checks body. Alerts only on true cross direction change.
+Band Cross Detector - ALTERNATING ALERTS
+Logic: HBand → LBand → HBand → LBand (prevents spam)
 """
 
 import json
 import os
-from datetime import datetime
 from typing import Dict, Optional
+from datetime import datetime
 
 class BandCrossDetector:
     def __init__(self, state_file: str = 'cache/gc_alert_state.json'):
@@ -24,14 +24,16 @@ class BandCrossDetector:
         return {}
     
     def _save_state(self):
-        os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+        dirname = os.path.dirname(self.state_file)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         with open(self.state_file, 'w') as f:
             json.dump(self.state, f, indent=2)
     
     def _get_coin_state(self, symbol: str) -> Dict:
         if symbol not in self.state:
             self.state[symbol] = {
-                'last_cross_type': None,    # e.g., 'hwick_above', 'hwick_below', 'body_hband_above', etc.
+                'last_band_crossed': None,
                 'alert_count': 0
             }
         return self.state[symbol]
@@ -41,96 +43,93 @@ class BandCrossDetector:
                          upper_band: float, lower_band: float, 
                          timestamp: int) -> Optional[Dict]:
         """
-        Detect band cross with priority: wicks first, then body
+        Detect alternating band crosses
+        First HBand → Next must be LBand → Next must be HBand
         """
         coin_state = self._get_coin_state(symbol)
-        last_cross = coin_state.get('last_cross_type', None)
+        last_band = coin_state.get('last_band_crossed')
         
         body_high = max(open_price, close_price)
         body_low = min(open_price, close_price)
         
+        hband_crossed = (body_high > upper_band) or (high_price > upper_band)
+        lband_crossed = (body_low < lower_band) or (low_price < lower_band)
+        
+        cross_method_h = 'BODY' if body_high > upper_band else 'WICK'
+        cross_method_l = 'BODY' if body_low < lower_band else 'WICK'
+        
         alert = None
-
-        # Wick crossing logic
-        if high_price > upper_band and last_cross != 'hwick_above':
-            coin_state['last_cross_type'] = 'hwick_above'
-            coin_state['alert_count'] += 1
+        
+        if last_band is None:
+            if hband_crossed:
+                alert = self._create_hband_alert(symbol, open_price, high_price, low_price, 
+                                                 close_price, upper_band, lower_band, 
+                                                 timestamp, cross_method_h)
+                coin_state['last_band_crossed'] = 'HBAND'
+                coin_state['alert_count'] += 1
+            elif lband_crossed:
+                alert = self._create_lband_alert(symbol, open_price, high_price, low_price, 
+                                                 close_price, upper_band, lower_band, 
+                                                 timestamp, cross_method_l)
+                coin_state['last_band_crossed'] = 'LBAND'
+                coin_state['alert_count'] += 1
+        
+        elif last_band == 'HBAND':
+            if lband_crossed:
+                alert = self._create_lband_alert(symbol, open_price, high_price, low_price, 
+                                                 close_price, upper_band, lower_band, 
+                                                 timestamp, cross_method_l)
+                coin_state['last_band_crossed'] = 'LBAND'
+                coin_state['alert_count'] += 1
+        
+        elif last_band == 'LBAND':
+            if hband_crossed:
+                alert = self._create_hband_alert(symbol, open_price, high_price, low_price, 
+                                                 close_price, upper_band, lower_band, 
+                                                 timestamp, cross_method_h)
+                coin_state['last_band_crossed'] = 'HBAND'
+                coin_state['alert_count'] += 1
+        
+        if alert:
             self._save_state()
-            alert = {
-                'symbol': symbol,
-                'type': 'UPPER_BAND',
-                'alert_type': 'WICK_CROSS_ABOVE_HBAND',
-                'cross_method': 'WICK',
-                'timestamp': timestamp,
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'direction': 'BULLISH'
-            }
-        elif low_price < lower_band and last_cross != 'lwick_below':
-            coin_state['last_cross_type'] = 'lwick_below'
-            coin_state['alert_count'] += 1
-            self._save_state()
-            alert = {
-                'symbol': symbol,
-                'type': 'LOWER_BAND',
-                'alert_type': 'WICK_CROSS_BELOW_LBAND',
-                'cross_method': 'WICK',
-                'timestamp': timestamp,
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'direction': 'BEARISH'
-            }
-        # Body crossing logic (only if no wick cross triggered above)
-        elif body_high > upper_band and last_cross != 'body_hband_above':
-            coin_state['last_cross_type'] = 'body_hband_above'
-            coin_state['alert_count'] += 1
-            self._save_state()
-            alert = {
-                'symbol': symbol,
-                'type': 'UPPER_BAND',
-                'alert_type': 'BODY_CROSS_ABOVE_HBAND',
-                'cross_method': 'BODY',
-                'timestamp': timestamp,
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'direction': 'BULLISH'
-            }
-        elif body_low < lower_band and last_cross != 'body_lband_below':
-            coin_state['last_cross_type'] = 'body_lband_below'
-            coin_state['alert_count'] += 1
-            self._save_state()
-            alert = {
-                'symbol': symbol,
-                'type': 'LOWER_BAND',
-                'alert_type': 'BODY_CROSS_BELOW_LBAND',
-                'cross_method': 'BODY',
-                'timestamp': timestamp,
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'direction': 'BEARISH'
-            }
-        # Reset on inside channel (allows retrigger after recross)
-        elif lower_band <= body_low and body_high <= upper_band and last_cross not in [None, 'inside']:
-            coin_state['last_cross_type'] = 'inside'
-            self._save_state()
-
+        
         return alert
+    
+    def _create_hband_alert(self, symbol, open_price, high_price, low_price, close_price, 
+                           upper_band, lower_band, timestamp, cross_method):
+        return {
+            'symbol': symbol,
+            'type': 'HBAND_CROSS',
+            'band': 'HBAND',
+            'cross_method': cross_method,
+            'timestamp': timestamp,
+            'open': open_price,
+            'high': high_price,
+            'low': low_price,
+            'close': close_price,
+            'upper_band': upper_band,
+            'lower_band': lower_band,
+            'direction': 'BULLISH',
+            'alert_message': f"{symbol} crossed Filtered True Range High Band ({cross_method}) on 30m"
+        }
+    
+    def _create_lband_alert(self, symbol, open_price, high_price, low_price, close_price, 
+                           upper_band, lower_band, timestamp, cross_method):
+        return {
+            'symbol': symbol,
+            'type': 'LBAND_CROSS',
+            'band': 'LBAND',
+            'cross_method': cross_method,
+            'timestamp': timestamp,
+            'open': open_price,
+            'high': high_price,
+            'low': low_price,
+            'close': close_price,
+            'upper_band': upper_band,
+            'lower_band': lower_band,
+            'direction': 'BEARISH',
+            'alert_message': f"{symbol} crossed Filtered True Range Low Band ({cross_method}) on 30m"
+        }
     
     def reset_coin_state(self, symbol: str):
         if symbol in self.state:
