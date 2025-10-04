@@ -1,0 +1,65 @@
+name: Gaussian Channel 15m
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Every 15 minutes
+  workflow_dispatch:
+
+jobs:
+  gc-15m:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install numpy requests pyyaml
+      
+      - name: Create directories
+        run: mkdir -p cache logs config
+      
+      - name: Download state
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gc-state-15m
+          path: cache/
+      
+      - name: Run 15m analysis
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python test_gc_15m.py
+      
+      - name: Check if state exists
+        id: check_state
+        run: |
+          if [ -f cache/gc_15m_state.json ]; then
+            echo "state_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload state
+        if: steps.check_state.outputs.state_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-state-15m
+          path: cache/gc_15m_state.json
+          retention-days: 30
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-logs-15m
+          path: logs/
+          retention-days: 7
