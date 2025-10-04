@@ -106,3 +106,61 @@ class TelegramBot:
         
         return message
 
+    def format_batch_alert(self, alerts: List[dict], timeframe_minutes: int = 30) -> str:
+        """Format batch alerts - works for 15m, 30m, 4h"""
+        if not alerts:
+            return ""
+        
+        bullish_alerts = [a for a in alerts if a.get('direction') == 'BULLISH']
+        bearish_alerts = [a for a in alerts if a.get('direction') == 'BEARISH']
+        
+        total_signals = len(alerts)
+        bullish_count = len(bullish_alerts)
+        bearish_count = len(bearish_alerts)
+        
+        tf_map = {15: "15M", 30: "30M", 240: "4H"}
+        tf_label = tf_map.get(timeframe_minutes, f"{timeframe_minutes}M")
+        
+        ist_time = self._get_ist_time()
+        
+        message = f"<b>{total_signals} Gaussian Channel Signals</b>\n\n"
+        message += f"Time: {ist_time}\n"
+        message += f"Timeframe: {tf_label}\n\n"
+        
+        if bullish_alerts:
+            message += "<b>BULLISH</b>\n"
+            
+            for i, alert in enumerate(bullish_alerts, 1):
+                symbol = alert['symbol'].replace('USDT', '')
+                cross_method = alert.get('cross_method', 'BODY')
+                band = alert.get('band', 'HBAND')
+                price = alert['close']
+                
+                tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
+                
+                message += f"{i}. <b>{symbol}</b>\n"
+                message += f"   {band} Cross ({cross_method})\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   <a href='{tv_url}'>Chart</a> | <a href='{cg_url}'>Heat</a>\n\n"
+        
+        if bearish_alerts:
+            message += "<b>BEARISH</b>\n"
+            
+            for i, alert in enumerate(bearish_alerts, 1):
+                symbol = alert['symbol'].replace('USDT', '')
+                cross_method = alert.get('cross_method', 'BODY')
+                band = alert.get('band', 'LBAND')
+                price = alert['close']
+                
+                tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
+                
+                message += f"{i}. <b>{symbol}</b>\n"
+                message += f"   {band} Cross ({cross_method})\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   <a href='{tv_url}'>Chart</a> | <a href='{cg_url}'>Heat</a>\n\n"
+        
+        message += f"<b>Summary:</b> {bullish_count} Bullish | {bearish_count} Bearish"
+        
+        return message
+
+
