@@ -66,7 +66,9 @@ class Gaussian30m:
             
             filter_line, upper_band, lower_band = self.gaussian.calculate(high, low, close)
             
+            # Use index -2 (last closed candle)
             idx = -2
+            
             alert = self.detector.detect_30m_cross(
                 symbol=symbol,
                 open_price=open_price[idx],
@@ -79,7 +81,12 @@ class Gaussian30m:
             )
             
             if alert:
-                print(f"ALERT: {symbol}: {alert['type']} ({alert['cross_method']})")
+                # Add current price and candle time to alert
+                alert['current_price'] = close[-1]  # Most recent price
+                alert['cross_time'] = datetime.fromtimestamp(timestamps[idx]/1000).strftime('%H:%M %Z')
+                alert['minutes_ago'] = int((timestamps[-1] - timestamps[idx]) / 60000)
+                
+                print(f"ALERT: {symbol}: {alert['type']} ({alert['cross_method']}) - {alert['minutes_ago']}min ago")
                 self.batch_alerts.append(alert)
                 self._log_alert(alert)
             else:
