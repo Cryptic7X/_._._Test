@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Band Cross Detector - FRESH SIGNALS ONLY
-Only alerts on NEW crosses within last 30 minutes
+Band Cross Detector - TRUE CROSSOVER DETECTION (15m/30m)
+Detects FIRST candle that crosses HBand or LBand
+Alternating alerts: HBand → LBand → HBand
 """
 
 import json
@@ -13,7 +14,6 @@ class BandCrossDetector:
     def __init__(self, state_file: str = 'cache/gc_alert_state.json'):
         self.state_file = state_file
         self.state = self._load_state()
-        self.current_run_time = int(datetime.now().timestamp() * 1000)
     
     def _load_state(self) -> Dict:
         if os.path.exists(self.state_file):
@@ -34,9 +34,12 @@ class BandCrossDetector:
     def _get_coin_state(self, symbol: str) -> Dict:
         if symbol not in self.state:
             self.state[symbol] = {
-                'last_hband_cross_time': 0,
-                'last_lband_cross_time': 0,
                 'last_band_crossed': None,
+                'prev_high': None,
+                'prev_low': None,
+                'prev_close': None,
+                'prev_upper_band': None,
+                'prev_lower_band': None,
                 'alert_count': 0
             }
         return self.state[symbol]
@@ -46,97 +49,89 @@ class BandCrossDetector:
                          upper_band: float, lower_band: float, 
                          timestamp: int) -> Optional[Dict]:
         """
-        Detect fresh band crosses only
-        
-        Rules:
-        1. Only alert if candle timestamp is within last 30 min
-        2. Alternating bands (HBand → LBand → HBand)
-        3. No duplicate alerts for same timestamp
+        Detect TRUE crossover (first touch after not touching)
+        Works for both 15m and 30m
         """
         coin_state = self._get_coin_state(symbol)
         
-        # Check if this candle is fresh (within last 30 minutes)
-        time_diff_minutes = (self.current_run_time - timestamp) / 1000 / 60
-        
-        if time_diff_minutes > 65:  # Allow 5 min buffer
-            # Skip old candles
-            return None
-        
+        prev_high = coin_state.get('prev_high')
+        prev_low = coin_state.get('prev_low')
+        prev_upper = coin_state.get('prev_upper_band')
+        prev_lower = coin_state.get('prev_lower_band')
         last_band = coin_state.get('last_band_crossed')
+        
+        # Update state for next iteration
+        coin_state['prev_high'] = high_price
+        coin_state['prev_low'] = low_price
+        coin_state['prev_close'] = close_price
+        coin_state['prev_upper_band'] = upper_band
+        coin_state['prev_lower_band'] = lower_band
+        
+        if prev_high is None or prev_upper is None:
+            self._save_state()
+            return None
         
         body_high = max(open_price, close_price)
         body_low = min(open_price, close_price)
         
-        hband_crossed = (body_high > upper_band) or (high_price > upper_band)
-        lband_crossed = (body_low < lower_band) or (low_price < lower_band)
-        
+        # Detect crossovers
+        curr_touches_hband = (high_price > upper_band) or (body_high > upper_band)
+        prev_touches_hband = (prev_high > prev_upper)
+        hband_crossover = curr_touches_hband and not prev_touches_hband
         cross_method_h = 'BODY' if body_high > upper_band else 'WICK'
+        
+        curr_touches_lband = (low_price < lower_band) or (body_low < lower_band)
+        prev_touches_lband = (prev_low < prev_lower)
+        lband_crossover = curr_touches_lband and not prev_touches_lband
         cross_method_l = 'BODY' if body_low < lower_band else 'WICK'
         
         alert = None
         
-        # Alternating logic with timestamp check
-        if last_band is None or last_band == '':
-            # First alert - accept any
-            if hband_crossed:
-                last_hband_time = coin_state.get('last_hband_cross_time', 0)
-                if timestamp > last_hband_time:
-                    alert = self._create_hband_alert(symbol, open_price, high_price, low_price, 
-                                                     close_price, upper_band, lower_band, 
-                                                     timestamp, cross_method_h)
-                    coin_state['last_band_crossed'] = 'HBAND'
-                    coin_state['last_hband_cross_time'] = timestamp
-                    coin_state['alert_count'] += 1
-            
-            elif lband_crossed:
-                last_lband_time = coin_state.get('last_lband_cross_time', 0)
-                if timestamp > last_lband_time:
-                    alert = self._create_lband_alert(symbol, open_price, high_price, low_price, 
-                                                     close_price, upper_band, lower_band, 
-                                                     timestamp, cross_method_l)
-                    coin_state['last_band_crossed'] = 'LBAND'
-                    coin_state['last_lband_cross_time'] = timestamp
-                    coin_state['alert_count'] += 1
+        if last_band is None:
+            if hband_crossover:
+                alert = self._create_alert(symbol, 'HBAND', cross_method_h, 'BULLISH',
+                                          open_price, high_price, low_price, close_price,
+                                          upper_band, lower_band, timestamp)
+                coin_state['last_band_crossed'] = 'HBAND'
+                coin_state['alert_count'] += 1
+            elif lband_crossover:
+                alert = self._create_alert(symbol, 'LBAND', cross_method_l, 'BEARISH',
+                                          open_price, high_price, low_price, close_price,
+                                          upper_band, lower_band, timestamp)
+                coin_state['last_band_crossed'] = 'LBAND'
+                coin_state['alert_count'] += 1
         
         elif last_band == 'HBAND':
-            # Last was HBand - only accept LBand now
-            if lband_crossed:
-                last_lband_time = coin_state.get('last_lband_cross_time', 0)
-                if timestamp > last_lband_time:
-                    alert = self._create_lband_alert(symbol, open_price, high_price, low_price, 
-                                                     close_price, upper_band, lower_band, 
-                                                     timestamp, cross_method_l)
-                    coin_state['last_band_crossed'] = 'LBAND'
-                    coin_state['last_lband_cross_time'] = timestamp
-                    coin_state['alert_count'] += 1
+            if lband_crossover:
+                alert = self._create_alert(symbol, 'LBAND', cross_method_l, 'BEARISH',
+                                          open_price, high_price, low_price, close_price,
+                                          upper_band, lower_band, timestamp)
+                coin_state['last_band_crossed'] = 'LBAND'
+                coin_state['alert_count'] += 1
         
         elif last_band == 'LBAND':
-            # Last was LBand - only accept HBand now
-            if hband_crossed:
-                last_hband_time = coin_state.get('last_hband_cross_time', 0)
-                if timestamp > last_hband_time:
-                    alert = self._create_hband_alert(symbol, open_price, high_price, low_price, 
-                                                     close_price, upper_band, lower_band, 
-                                                     timestamp, cross_method_h)
-                    coin_state['last_band_crossed'] = 'HBAND'
-                    coin_state['last_hband_cross_time'] = timestamp
-                    coin_state['alert_count'] += 1
+            if hband_crossover:
+                alert = self._create_alert(symbol, 'HBAND', cross_method_h, 'BULLISH',
+                                          open_price, high_price, low_price, close_price,
+                                          upper_band, lower_band, timestamp)
+                coin_state['last_band_crossed'] = 'HBAND'
+                coin_state['alert_count'] += 1
         
-        if alert:
-            self._save_state()
-        
+        self._save_state()
         return alert
     
-    def _create_hband_alert(self, symbol, open_price, high_price, low_price, close_price, 
-                           upper_band, lower_band, timestamp, cross_method):
-        # Get human readable time
+    def _create_alert(self, symbol, band, cross_method, direction,
+                     open_price, high_price, low_price, close_price,
+                     upper_band, lower_band, timestamp):
         dt = datetime.fromtimestamp(timestamp / 1000)
         time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
         
+        band_name = 'HBand' if band == 'HBAND' else 'LBand'
+        
         return {
             'symbol': symbol,
-            'type': 'HBAND_CROSS',
-            'band': 'HBAND',
+            'type': f'{band}_CROSS',
+            'band': band,
             'cross_method': cross_method,
             'timestamp': timestamp,
             'time_str': time_str,
@@ -146,31 +141,8 @@ class BandCrossDetector:
             'close': close_price,
             'upper_band': upper_band,
             'lower_band': lower_band,
-            'direction': 'BULLISH',
-            'alert_message': f"{symbol} crossed HBand ({cross_method}) at {time_str}"
-        }
-    
-    def _create_lband_alert(self, symbol, open_price, high_price, low_price, close_price, 
-                           upper_band, lower_band, timestamp, cross_method):
-        # Get human readable time
-        dt = datetime.fromtimestamp(timestamp / 1000)
-        time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-        
-        return {
-            'symbol': symbol,
-            'type': 'LBAND_CROSS',
-            'band': 'LBAND',
-            'cross_method': cross_method,
-            'timestamp': timestamp,
-            'time_str': time_str,
-            'open': open_price,
-            'high': high_price,
-            'low': low_price,
-            'close': close_price,
-            'upper_band': upper_band,
-            'lower_band': lower_band,
-            'direction': 'BEARISH',
-            'alert_message': f"{symbol} crossed LBand ({cross_method}) at {time_str}"
+            'direction': direction,
+            'alert_message': f"{symbol} crossed {band_name} ({cross_method})"
         }
     
     def reset_coin_state(self, symbol: str):
