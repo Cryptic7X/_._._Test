@@ -1,229 +1,196 @@
 #!/usr/bin/env python3
 """
-Band Cross Detector - SIMPLE LOGIC
-Only alerts when candle body ACTUALLY crosses a band line
+Gaussian Channel Calculator - Direct Port from Pine Script
+Supports all 9 poles with exact Pine Script logic
 """
 
-import json
-import os
-from datetime import datetime
-from typing import Dict, Optional
+import numpy as np
+import math
+from typing import Tuple, List
 
-class BandCrossDetector:
-    def __init__(self, state_file: str = 'cache/gc_alert_state.json'):
-        """Initialize band cross detector"""
-        self.state_file = state_file
-        self.state = self._load_state()
-    
-    def _load_state(self) -> Dict:
-        """Load alert state from file"""
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r') as f:
-                    return json.load(f)
-            except:
-                pass
-        return {}
-    
-    def _save_state(self):
-        """Save alert state to file"""
-        os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-        with open(self.state_file, 'w') as f:
-            json.dump(self.state, f, indent=2)
-    
-    def _get_coin_state(self, symbol: str) -> Dict:
-        """Get state for specific coin"""
-        if symbol not in self.state:
-            self.state[symbol] = {
-                'last_upper_cross': None,
-                'last_lower_cross': None,
-                'last_filter_cross': None,
-                'alert_count': 0
-            }
-        return self.state[symbol]
-    
-    def detect_30m_cross(self, symbol: str, open_price: float, close_price: float, 
-                         high_price: float, low_price: float,
-                         upper_band: float, lower_band: float, 
-                         timestamp: int) -> Optional[Dict]:
+class GaussianChannel:
+    def __init__(self, poles: int = 4, period: int = 144, multiplier: float = 1.414, 
+                 reduced_lag: bool = False, fast_response: bool = False):
         """
-        Detect 30-minute band cross - SIMPLE LOGIC
-        Alert when candle body crosses upper OR lower band
+        Initialize Gaussian Channel with Pine Script parameters
         
         Args:
-            symbol: Coin symbol
-            open_price: Candle open
-            close_price: Candle close
-            high_price: Candle high
-            low_price: Candle low
-            upper_band: Upper band value
-            lower_band: Lower band value
-            timestamp: Candle timestamp
+            poles: Number of poles (1-9)
+            period: Sampling period
+            multiplier: True range multiplier for bands
+            reduced_lag: Reduced lag mode
+            fast_response: Fast response mode
+        """
+        self.poles = max(1, min(9, poles))
+        self.period = max(2, period)
+        self.multiplier = multiplier
+        self.reduced_lag = reduced_lag
+        self.fast_response = fast_response
+        
+        # Calculate beta and alpha (Pine Script logic)
+        self.beta = (1 - math.cos(4 * math.asin(1) / self.period)) / (pow(1.414, 2 / self.poles) - 1)
+        self.alpha = -self.beta + math.sqrt(pow(self.beta, 2) + 2 * self.beta)
+        
+        # Lag calculation
+        self.lag = int((self.period - 1) / (2 * self.poles))
+    
+    def _get_weights(self, poles: int) -> List[int]:
+        """Get binomial coefficient weights for filter calculation"""
+        weights = [poles]  # m1 = poles
+        
+        # m2
+        if poles >= 2:
+            m2_map = {9: 36, 8: 28, 7: 21, 6: 15, 5: 10, 4: 6, 3: 3, 2: 1}
+            weights.append(m2_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m3
+        if poles >= 3:
+            m3_map = {9: 84, 8: 56, 7: 35, 6: 20, 5: 10, 4: 4, 3: 1}
+            weights.append(m3_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m4
+        if poles >= 4:
+            m4_map = {9: 126, 8: 70, 7: 35, 6: 15, 5: 5, 4: 1}
+            weights.append(m4_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m5
+        if poles >= 5:
+            m5_map = {9: 126, 8: 56, 7: 21, 6: 6, 5: 1}
+            weights.append(m5_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m6
+        if poles >= 6:
+            m6_map = {9: 84, 8: 28, 7: 7, 6: 1}
+            weights.append(m6_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m7
+        if poles >= 7:
+            m7_map = {9: 36, 8: 8, 7: 1}
+            weights.append(m7_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m8
+        if poles >= 8:
+            m8_map = {9: 9, 8: 1}
+            weights.append(m8_map.get(poles, 0))
+        else:
+            weights.append(0)
+        
+        # m9
+        if poles >= 9:
+            weights.append(1)
+        else:
+            weights.append(0)
+        
+        return weights
+    
+    def _calculate_filter(self, source: np.ndarray, poles: int) -> np.ndarray:
+        """
+        Calculate Gaussian filter for given poles
+        Direct port of Pine Script f_filt9x function
+        """
+        n = len(source)
+        filt = np.zeros(n)
+        alpha = self.alpha
+        x = 1 - alpha
+        
+        weights = self._get_weights(poles)
+        
+        for i in range(n):
+            if i < 10:
+                filt[i] = source[i]
+            else:
+                # Pine Script filter formula
+                val = pow(alpha, poles) * source[i]
+                val += weights[0] * x * filt[i-1]
+                
+                if poles >= 2:
+                    val -= weights[1] * pow(x, 2) * filt[i-2]
+                if poles >= 3:
+                    val += weights[2] * pow(x, 3) * filt[i-3]
+                if poles >= 4:
+                    val -= weights[3] * pow(x, 4) * filt[i-4]
+                if poles >= 5:
+                    val += weights[4] * pow(x, 5) * filt[i-5]
+                if poles >= 6:
+                    val -= weights[5] * pow(x, 6) * filt[i-6]
+                if poles >= 7:
+                    val += weights[6] * pow(x, 7) * filt[i-7]
+                if poles >= 8:
+                    val -= weights[7] * pow(x, 8) * filt[i-8]
+                if poles >= 9:
+                    val += weights[8] * pow(x, 9) * filt[i-9]
+                
+                filt[i] = val
+        
+        return filt
+    
+    def calculate(self, high: np.ndarray, low: np.ndarray, close: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Calculate Gaussian Channel (filter line, upper band, lower band)
+        
+        Args:
+            high: High prices
+            low: Low prices
+            close: Close prices
         
         Returns:
-            Alert dict if cross detected, None otherwise
+            Tuple of (filter, upper_band, lower_band)
         """
-        coin_state = self._get_coin_state(symbol)
+        # Calculate HLC3 source
+        hlc3 = (high + low + close) / 3
         
-        # Define candle body (min/max of open/close)
-        body_high = max(open_price, close_price)
-        body_low = min(open_price, close_price)
+        # Calculate true range
+        n = len(close)
+        tr = np.zeros(n)
+        tr[0] = high[0] - low[0]
+        for i in range(1, n):
+            tr[i] = max(
+                high[i] - low[i],
+                abs(high[i] - close[i-1]),
+                abs(low[i] - close[i-1])
+            )
         
-        # Check if body crosses upper band
-        body_crosses_upper = body_high > upper_band
+        # Apply lag reduction if enabled
+        if self.reduced_lag and n > self.lag:
+            srcdata = hlc3.copy()
+            trdata = tr.copy()
+            for i in range(self.lag, n):
+                srcdata[i] = hlc3[i] + (hlc3[i] - hlc3[i - self.lag])
+                trdata[i] = tr[i] + (tr[i] - tr[i - self.lag])
+        else:
+            srcdata = hlc3
+            trdata = tr
         
-        # Check if body crosses lower band
-        body_crosses_lower = body_low < lower_band
+        # Calculate N-pole filters
+        filtn = self._calculate_filter(srcdata, self.poles)
+        filtntr = self._calculate_filter(trdata, self.poles)
         
-        # Optional: Check wicks if body doesn't cross
-        wick_touches_upper = high_price > upper_band and not body_crosses_upper
-        wick_touches_lower = low_price < lower_band and not body_crosses_lower
-        
-        alert = None
-        
-        # UPPER BAND CROSS (Body)
-        if body_crosses_upper:
-            # Check if we already sent alert for this cross
-            if coin_state['last_upper_cross'] != timestamp:
-                coin_state['last_upper_cross'] = timestamp
-                coin_state['alert_count'] += 1
-                
-                alert = {
-                    'symbol': symbol,
-                    'type': 'UPPER_BAND',
-                    'cross_method': 'BODY',
-                    'timestamp': timestamp,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'upper_band': upper_band,
-                    'lower_band': lower_band,
-                    'direction': 'BULLISH'
-                }
-        
-        # LOWER BAND CROSS (Body)
-        elif body_crosses_lower:
-            # Check if we already sent alert for this cross
-            if coin_state['last_lower_cross'] != timestamp:
-                coin_state['last_lower_cross'] = timestamp
-                coin_state['alert_count'] += 1
-                
-                alert = {
-                    'symbol': symbol,
-                    'type': 'LOWER_BAND',
-                    'cross_method': 'BODY',
-                    'timestamp': timestamp,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'upper_band': upper_band,
-                    'lower_band': lower_band,
-                    'direction': 'BEARISH'
-                }
-        
-        # UPPER BAND TOUCH (Wick only) - Optional, less reliable
-        elif wick_touches_upper:
-            if coin_state['last_upper_cross'] != timestamp:
-                coin_state['last_upper_cross'] = timestamp
-                coin_state['alert_count'] += 1
-                
-                alert = {
-                    'symbol': symbol,
-                    'type': 'UPPER_BAND',
-                    'cross_method': 'WICK',
-                    'timestamp': timestamp,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'upper_band': upper_band,
-                    'lower_band': lower_band,
-                    'direction': 'BULLISH'
-                }
-        
-        # LOWER BAND TOUCH (Wick only) - Optional, less reliable
-        elif wick_touches_lower:
-            if coin_state['last_lower_cross'] != timestamp:
-                coin_state['last_lower_cross'] = timestamp
-                coin_state['alert_count'] += 1
-                
-                alert = {
-                    'symbol': symbol,
-                    'type': 'LOWER_BAND',
-                    'cross_method': 'WICK',
-                    'timestamp': timestamp,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'upper_band': upper_band,
-                    'lower_band': lower_band,
-                    'direction': 'BEARISH'
-                }
-        
-        if alert:
-            self._save_state()
-        
-        return alert
-    
-    def detect_4h_cross(self, symbol: str, open_price: float, close_price: float,
-                        high_price: float, low_price: float,
-                        filter_line: float, upper_band: float, lower_band: float,
-                        timestamp: int) -> Optional[Dict]:
-        """
-        Detect 4-hour line cross (filter, upper band, OR lower band)
-        Simple logic: check if body crosses any line
-        """
-        coin_state = self._get_coin_state(symbol)
-        
-        # Define candle body
-        body_high = max(open_price, close_price)
-        body_low = min(open_price, close_price)
-        
-        # Check crosses
-        crosses_upper = body_high > upper_band
-        crosses_filter = body_low <= filter_line <= body_high
-        crosses_lower = body_low < lower_band
-        
-        # Build alert
-        crossed_lines = []
-        if crosses_upper and coin_state.get('last_upper_cross') != timestamp:
-            crossed_lines.append('UPPER_BAND')
-            coin_state['last_upper_cross'] = timestamp
-        
-        if crosses_filter and coin_state.get('last_filter_cross') != timestamp:
-            crossed_lines.append('FILTER')
-            coin_state['last_filter_cross'] = timestamp
-        
-        if crosses_lower and coin_state.get('last_lower_cross') != timestamp:
-            crossed_lines.append('LOWER_BAND')
-            coin_state['last_lower_cross'] = timestamp
-        
-        if crossed_lines:
-            coin_state['alert_count'] = coin_state.get('alert_count', 0) + 1
-            self._save_state()
+        # Calculate 1-pole filters for fast response mode
+        if self.fast_response:
+            filt1 = self._calculate_filter(srcdata, 1)
+            filt1tr = self._calculate_filter(trdata, 1)
             
-            return {
-                'symbol': symbol,
-                'type': '_'.join(crossed_lines),
-                'cross_method': 'BODY',
-                'crossed_lines': crossed_lines,
-                'timestamp': timestamp,
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'filter': filter_line,
-                'upper_band': upper_band,
-                'lower_band': lower_band
-            }
+            # Average N-pole and 1-pole
+            filt = (filtn + filt1) / 2
+            filttr = (filtntr + filt1tr) / 2
+        else:
+            filt = filtn
+            filttr = filtntr
         
-        return None
-    
-    def reset_coin_state(self, symbol: str):
-        """Reset state for a specific coin"""
-        if symbol in self.state:
-            del self.state[symbol]
-            self._save_state()
+        # Calculate bands
+        upper_band = filt + filttr * self.multiplier
+        lower_band = filt - filttr * self.multiplier
+        
+        return filt, upper_band, lower_band
