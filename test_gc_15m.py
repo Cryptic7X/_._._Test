@@ -103,19 +103,26 @@ class GaussianTest15m:
             json.dump(alert, f)
             f.write('\n')
     
-    def send_batch_alerts(self):
+    def send_batch_alerts(self, max_signals_per_message=40):
         if not self.batch_alerts:
             print("\nINFO: No alerts to send")
             return
-        
-        print(f"\nSending {len(self.batch_alerts)} alerts in batch...")
-        message = self.telegram.format_batch_alert(self.batch_alerts, timeframe_minutes=15)
-        success = self.telegram.send_message(message)
-        
-        if success:
-            print(f"SUCCESS: Batch alert sent to Telegram ({len(self.batch_alerts)} signals)")
-        else:
-            print(f"ERROR: Failed to send batch alert to Telegram")
+    
+        total_alerts = len(self.batch_alerts)
+        batches = [
+            self.batch_alerts[i:i + max_signals_per_message]
+            for i in range(0, total_alerts, max_signals_per_message)
+        ]
+    
+        for batch_num, batch in enumerate(batches, 1):
+            print(f"\n📤 Sending batch {batch_num} ({len(batch)} alerts)...")
+            message = self.telegram.format_batch_alert(batch, timeframe_minutes=15)
+            success = self.telegram.send_message(message)
+            if success:
+                print(f"✅ Batch {batch_num} sent to Telegram ({len(batch)} signals)")
+            else:
+                print(f"❌ ERROR: Batch {batch_num} failed to send to Telegram")
+
     
     def run(self):
         print("\n" + "="*60)
