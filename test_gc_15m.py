@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Gaussian Channel 15-Minute Test Runner - FIXED VERSION
+Gaussian Channel 15-Minute Test Runner
+Tests 30m analysis logic on 15m timeframe with batched Telegram alerts
 """
 
 import os
@@ -10,11 +11,14 @@ import numpy as np
 from datetime import datetime
 from typing import List
 
+# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from indicators.gaussian_channel import GaussianChannel
 from indicators.band_detector import BandCrossDetector
 from utils.telegram_bot import TelegramBot
+
+# Import existing exchange manager
 from simple_exchange import SimpleExchangeManager
 
 class GaussianTest15m:
@@ -30,6 +34,8 @@ class GaussianTest15m:
         )
         self.detector = BandCrossDetector(state_file='cache/gc_test_15m_state.json')
         self.telegram = TelegramBot()
+        
+        # Store all alerts for batching
         self.batch_alerts = []
         
         print("🚀 Gaussian Channel 15m Test System Initialized")
@@ -56,14 +62,14 @@ class GaussianTest15m:
     def analyze_coin(self, symbol: str) -> bool:
         """Analyze single coin for band crosses"""
         try:
-            # Fetch data
+            # Fetch 15m OHLCV data
             data, source = self.exchange.fetch_ohlcv_with_fallback(symbol, '15m', limit=200)
             
             if not data or len(data['close']) < 150:
                 print(f"⚠️ {symbol}: Insufficient data")
                 return False
             
-            # Convert to numpy
+            # Convert to numpy arrays
             high = np.array(data['high'])
             low = np.array(data['low'])
             close = np.array(data['close'])
@@ -73,7 +79,7 @@ class GaussianTest15m:
             # Calculate Gaussian Channel
             filter_line, upper_band, lower_band = self.gaussian.calculate(high, low, close)
             
-            # Get last closed candle (index -2)
+            # Get last closed candle (index -2, since -1 is current unclosed)
             idx = -2
             candle_open = open_price[idx]
             candle_high = high[idx]
@@ -83,13 +89,13 @@ class GaussianTest15m:
             candle_lower = lower_band[idx]
             candle_time = timestamps[idx]
             
-            # Detect cross - PASS ALL REQUIRED ARGUMENTS
+            # Detect band cross - PASS ALL ARGUMENTS
             alert = self.detector.detect_30m_cross(
                 symbol=symbol,
                 open_price=candle_open,
                 close_price=candle_close,
-                high_price=candle_high,      # ✅ Added
-                low_price=candle_low,        # ✅ Added
+                high_price=candle_high,
+                low_price=candle_low,
                 upper_band=candle_upper,
                 lower_band=candle_lower,
                 timestamp=candle_time
@@ -98,8 +104,14 @@ class GaussianTest15m:
             if alert:
                 cross_method = alert.get('cross_method', 'BODY')
                 print(f"🔔 {symbol}: {alert['type']} ({cross_method}) - {alert['direction']}")
+                
+                # Add to batch
                 self.batch_alerts.append(alert)
+                
+                # Log alert
                 self._log_alert(alert)
+                
+                return True
             else:
                 print(f"✓ {symbol}: No cross")
             
@@ -113,40 +125,44 @@ class GaussianTest15m:
         """Log alert to file"""
         os.makedirs('logs', exist_ok=True)
         log_file = f"logs/gc_alerts_15m_{datetime.now().strftime('%Y%m%d')}.jsonl"
+        
         with open(log_file, 'a') as f:
             json.dump(alert, f)
             f.write('
 ')
     
     def send_batch_alerts(self):
-        """Send batch alerts to Telegram"""
+        """Send all collected alerts as one message"""
         if not self.batch_alerts:
             print("
 ℹ️ No alerts to send")
             return
         
         print(f"
-📤 Sending {len(self.batch_alerts)} alert(s)...")
+📤 Sending {len(self.batch_alerts)} alert(s) in batch...")
+        
+        # Format and send batch message
         message = self.telegram.format_batch_alert(self.batch_alerts, timeframe_minutes=15)
         success = self.telegram.send_message(message)
         
         if success:
-            print(f"✅ Sent to Telegram")
+            print(f"✅ Batch alert sent to Telegram ({len(self.batch_alerts)} signals)")
         else:
-            print(f"❌ Failed to send")
+            print(f"❌ Failed to send batch alert to Telegram")
     
     def run(self):
-        """Run analysis"""
+        """Run 15m test analysis"""
         print("
 " + "="*60)
         print("🧪 Starting Gaussian Channel 15m Test")
         print("="*60 + "
 ")
         
+        # Load ALL coins from coins.txt
         coins = self.load_coins()
         
         if not coins:
-            print("❌ No coins")
+            print("❌ No coins to analyze")
             return
         
         print(f"📊 Analyzing {len(coins)} coins on 15-minute timeframe...")
@@ -154,21 +170,25 @@ class GaussianTest15m:
 ")
         
         success_count = 0
+        
         for i, symbol in enumerate(coins, 1):
             print(f"
 [{i}/{len(coins)}] {symbol}")
-            if self.analyze_coin(symbol):
+            success = self.analyze_coin(symbol)
+            if success:
                 success_count += 1
         
         print("
 " + "="*60)
-        print(f"✅ Complete: {success_count}/{len(coins)} processed")
+        print(f"✅ Analysis complete: {success_count}/{len(coins)} coins processed")
         print("="*60 + "
 ")
         
+        # Send batch alerts after all analysis is complete
         self.send_batch_alerts()
 
 def main():
+    """Main entry point"""
     tester = GaussianTest15m()
     tester.run()
 
