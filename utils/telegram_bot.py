@@ -52,16 +52,10 @@ class TelegramBot:
         if not alerts:
             return ""
         
-        # Filter to only show recent alerts (crossed in last 60 minutes)
-        recent_alerts = [a for a in alerts if a.get('minutes_ago', 999) <= 60]
+        bullish_alerts = [a for a in alerts if a.get('direction') == 'BULLISH']
+        bearish_alerts = [a for a in alerts if a.get('direction') == 'BEARISH']
         
-        if not recent_alerts:
-            return ""
-        
-        bullish_alerts = [a for a in recent_alerts if a.get('direction') == 'BULLISH']
-        bearish_alerts = [a for a in recent_alerts if a.get('direction') == 'BEARISH']
-        
-        total_signals = len(recent_alerts)
+        total_signals = len(alerts)
         bullish_count = len(bullish_alerts)
         bearish_count = len(bearish_alerts)
         
@@ -70,49 +64,45 @@ class TelegramBot:
         
         ist_time = self._get_ist_time()
         
-        message = f"<b>{total_signals} Gaussian Channel Signal{'s' if total_signals != 1 else ''}</b>\n\n"
-        message += f"Time: {ist_time}\n"
+        message = f"<b>{total_signals} Fresh Gaussian Signals</b>\n\n"
+        message += f"Detected: {ist_time}\n"
         message += f"Timeframe: {tf_label}\n\n"
         
         if bullish_alerts:
-            message += "<b>BULLISH Signals</b>\n"
-            message += "------------------------\n"
+            message += "<b>BULLISH</b>\n"
             
             for i, alert in enumerate(bullish_alerts, 1):
                 symbol = alert['symbol'].replace('USDT', '')
                 cross_method = alert.get('cross_method', 'BODY')
-                cross_price = alert['close']
-                current_price = alert.get('current_price', cross_price)
-                minutes_ago = alert.get('minutes_ago', 0)
+                price = alert['close']
+                cross_time = alert.get('time_str', 'Unknown')
                 
                 tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
                 
                 message += f"{i}. <b>{symbol}</b>\n"
                 message += f"   HBand Cross ({cross_method})\n"
-                message += f"   Cross: ${cross_price:,.2f} ({minutes_ago}m ago)\n"
-                message += f"   Now: ${current_price:,.2f}\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   Time: {cross_time}\n"
                 message += f"   <a href='{tv_url}'>Chart</a> | <a href='{cg_url}'>Heat</a>\n\n"
         
         if bearish_alerts:
-            message += "<b>BEARISH Signals</b>\n"
-            message += "------------------------\n"
+            message += "<b>BEARISH</b>\n"
             
             for i, alert in enumerate(bearish_alerts, 1):
                 symbol = alert['symbol'].replace('USDT', '')
                 cross_method = alert.get('cross_method', 'BODY')
-                cross_price = alert['close']
-                current_price = alert.get('current_price', cross_price)
-                minutes_ago = alert.get('minutes_ago', 0)
+                price = alert['close']
+                cross_time = alert.get('time_str', 'Unknown')
                 
                 tv_url, cg_url = self._get_chart_links(alert['symbol'], timeframe_minutes)
                 
                 message += f"{i}. <b>{symbol}</b>\n"
                 message += f"   LBand Cross ({cross_method})\n"
-                message += f"   Cross: ${cross_price:,.2f} ({minutes_ago}m ago)\n"
-                message += f"   Now: ${current_price:,.2f}\n"
+                message += f"   Price: ${price:,.2f}\n"
+                message += f"   Time: {cross_time}\n"
                 message += f"   <a href='{tv_url}'>Chart</a> | <a href='{cg_url}'>Heat</a>\n\n"
         
-        message += f"<b>Summary</b>\n"
-        message += f"Bullish: {bullish_count} | Bearish: {bearish_count}"
+        message += f"<b>Summary:</b> {bullish_count} Bullish | {bearish_count} Bearish"
         
         return message
+
