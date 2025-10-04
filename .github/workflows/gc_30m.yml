@@ -39,10 +39,27 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python test_gc_30m.py
       
+      - name: Check if state file exists
+        id: check_state
+        run: |
+          if [ -f cache/gc_30m_state.json ]; then
+            echo "state_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Upload state
+        if: steps.check_state.outputs.state_exists == 'true'
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: gc-state-30m
           path: cache/gc_30m_state.json
           retention-days: 30
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-logs-30m
+          path: logs/
+          retention-days: 7
