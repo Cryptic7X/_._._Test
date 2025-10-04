@@ -1,0 +1,65 @@
+name: Gaussian Channel 4H
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours
+  workflow_dispatch:
+
+jobs:
+  gc-4h:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          pip install numpy requests pyyaml
+      
+      - name: Create directories
+        run: mkdir -p cache logs config
+      
+      - name: Download state
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gc-state-4h
+          path: cache/
+      
+      - name: Run 4H analysis
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python test_gc_4h.py
+      
+      - name: Check if state exists
+        id: check_state
+        run: |
+          if [ -f cache/gc_4h_state.json ]; then
+            echo "state_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload state
+        if: steps.check_state.outputs.state_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-state-4h
+          path: cache/gc_4h_state.json
+          retention-days: 90
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gc-logs-4h
+          path: logs/
+          retention-days: 7
