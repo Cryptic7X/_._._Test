@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Gaussian Channel 15-Minute Test Runner
+Gaussian Channel 15-Minute Production System
+Pinpoint accurate crossover detection
 """
 
 import os
@@ -17,16 +18,21 @@ from indicators.band_detector import BandCrossDetector
 from utils.telegram_bot import TelegramBot
 from simple_exchange import SimpleExchangeManager
 
-class GaussianTest15m:
+class Gaussian15m:
     def __init__(self):
         self.exchange = SimpleExchangeManager()
-        self.gaussian = GaussianChannel(poles=4, period=144, multiplier=1.414, reduced_lag=False, fast_response=False)
-        self.detector = BandCrossDetector(state_file='cache/gc_test_15m_state.json')
+        self.gaussian = GaussianChannel(
+            poles=4,
+            period=144,
+            multiplier=1.414,
+            reduced_lag=True,
+            fast_response=False
+        )
+        self.detector = BandCrossDetector(state_file='cache/gc_15m_state.json')
         self.telegram = TelegramBot()
         self.batch_alerts = []
         
-        print("Gaussian Channel 15m Test System Initialized")
-        print(f"Parameters: Poles={self.gaussian.poles}, Period={self.gaussian.period}, Multiplier={self.gaussian.multiplier}")
+        print("Gaussian Channel 15m System Initialized")
     
     def load_coins(self) -> List[str]:
         coins_file = 'config/coins.txt'
@@ -42,7 +48,7 @@ class GaussianTest15m:
                 if coin and not coin.startswith('#'):
                     coins.append(coin)
         
-        print(f"Loaded {len(coins)} coins from coins.txt")
+        print(f"Loaded {len(coins)} coins")
         return coins
     
     def analyze_coin(self, symbol: str) -> bool:
@@ -62,33 +68,23 @@ class GaussianTest15m:
             filter_line, upper_band, lower_band = self.gaussian.calculate(high, low, close)
             
             idx = -2
-            candle_open = open_price[idx]
-            candle_high = high[idx]
-            candle_low = low[idx]
-            candle_close = close[idx]
-            candle_upper = upper_band[idx]
-            candle_lower = lower_band[idx]
-            candle_time = timestamps[idx]
-            
             alert = self.detector.detect_30m_cross(
                 symbol=symbol,
-                open_price=candle_open,
-                close_price=candle_close,
-                high_price=candle_high,
-                low_price=candle_low,
-                upper_band=candle_upper,
-                lower_band=candle_lower,
-                timestamp=candle_time
+                open_price=open_price[idx],
+                close_price=close[idx],
+                high_price=high[idx],
+                low_price=low[idx],
+                upper_band=upper_band[idx],
+                lower_band=lower_band[idx],
+                timestamp=timestamps[idx]
             )
             
             if alert:
-                cross_method = alert.get('cross_method', 'BODY')
-                print(f"ALERT: {symbol}: {alert['type']} ({cross_method}) - {alert['direction']}")
+                print(f"ALERT: {symbol}: {alert['band']} ({alert['cross_method']})")
                 self.batch_alerts.append(alert)
                 self._log_alert(alert)
-                return True
             else:
-                print(f"OK: {symbol}: No band cross detected")
+                print(f"OK: {symbol}")
             
             return True
             
@@ -98,63 +94,55 @@ class GaussianTest15m:
     
     def _log_alert(self, alert: dict):
         os.makedirs('logs', exist_ok=True)
-        log_file = f"logs/gc_alerts_15m_{datetime.now().strftime('%Y%m%d')}.jsonl"
+        log_file = f"logs/gc_15m_{datetime.now().strftime('%Y%m%d')}.jsonl"
         with open(log_file, 'a', encoding='utf-8') as f:
             json.dump(alert, f)
             f.write('\n')
     
-    def send_batch_alerts(self, max_signals_per_message=40):
+    def send_batch_alerts(self):
         if not self.batch_alerts:
-            print("\nINFO: No alerts to send")
+            print("\nNo alerts to send")
             return
-    
+        
         total_alerts = len(self.batch_alerts)
-        batches = [
-            self.batch_alerts[i:i + max_signals_per_message]
-            for i in range(0, total_alerts, max_signals_per_message)
-        ]
-    
+        batch_size = 40
+        
+        print(f"\nSending {total_alerts} alerts in batches of {batch_size}...")
+        
+        batches = [self.batch_alerts[i:i + batch_size] for i in range(0, total_alerts, batch_size)]
+        
         for batch_num, batch in enumerate(batches, 1):
-            print(f"\n📤 Sending batch {batch_num} ({len(batch)} alerts)...")
+            print(f"Batch {batch_num}/{len(batches)}: {len(batch)} alerts")
             message = self.telegram.format_batch_alert(batch, timeframe_minutes=15)
             success = self.telegram.send_message(message)
+            
             if success:
-                print(f"✅ Batch {batch_num} sent to Telegram ({len(batch)} signals)")
+                print(f"SUCCESS: Batch {batch_num} sent")
             else:
-                print(f"❌ ERROR: Batch {batch_num} failed to send to Telegram")
-
+                print(f"ERROR: Batch {batch_num} failed")
     
     def run(self):
         print("\n" + "="*60)
-        print("Starting Gaussian Channel 15m Test")
+        print("Gaussian Channel 15m Analysis")
         print("="*60 + "\n")
         
         coins = self.load_coins()
         
         if not coins:
-            print("ERROR: No coins to analyze")
             return
         
-        print(f"Analyzing {len(coins)} coins on 15-minute timeframe...")
-        print(f"Alerts will be batched and sent to Telegram\n")
-        
-        success_count = 0
+        print(f"Analyzing {len(coins)} coins...\n")
         
         for i, symbol in enumerate(coins, 1):
-            print(f"\n[{i}/{len(coins)}] {symbol}")
-            success = self.analyze_coin(symbol)
-            if success:
-                success_count += 1
+            print(f"[{i}/{len(coins)}] {symbol}")
+            self.analyze_coin(symbol)
         
         print("\n" + "="*60)
-        print(f"Analysis complete: {success_count}/{len(coins)} coins processed")
-        print("="*60 + "\n")
-        
         self.send_batch_alerts()
 
 def main():
-    tester = GaussianTest15m()
-    tester.run()
+    system = Gaussian15m()
+    system.run()
 
 if __name__ == "__main__":
     main()
