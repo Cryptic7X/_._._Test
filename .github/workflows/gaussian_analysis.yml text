@@ -4,20 +4,28 @@ on:
   schedule:
     # Run every 15 minutes
     - cron: '*/15 * * * *'
-  workflow_dispatch:  # Allow manual trigger
+  
+  # Allow manual trigger from Actions tab
+  workflow_dispatch:
+  
+  # Trigger on push to main branch (for testing)
+  push:
+    branches:
+      - main
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
       
       - name: Install dependencies
         run: |
@@ -30,3 +38,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python run_analysis.py
+      
+      - name: Upload logs (if failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-logs
+          path: '*.log'
+          retention-days: 7
