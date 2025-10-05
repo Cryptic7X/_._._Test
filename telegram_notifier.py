@@ -5,6 +5,7 @@ Telegram notification module for Gaussian Channel alerts
 import os
 import requests
 from datetime import datetime
+import pandas as pd
 
 
 class TelegramNotifier:
@@ -49,20 +50,10 @@ class TelegramNotifier:
             print(f"❌ Telegram send failed: {str(e)}")
             return False
     
-    def format_alert(self, result):
-        """
-        Format trading alert for Telegram
-        
-        Args:
-            result: Analysis result dict
-        
-        Returns:
-            str: Formatted HTML message
-        """
+    def format_single_alert(self, result):
+        """Format single alert in compact form"""
         arrow = '↑' if result['direction'] == 'from_below' else '↓'
         emoji = '🔴' if result['band'] == 'hband' else '🔵'
-        
-        # Determine signal emoji
         signal_emoji = '🟢' if result['signal'] == 'BULLISH' else '🔴'
         
         # Format time in IST
@@ -73,37 +64,15 @@ class TelegramNotifier:
         base_coin = result['coin'].replace('USDT', '')
         chart_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{base_coin}USDT&interval=15"
         
-        message = (
-            f"{emoji} <b>{result['coin']}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Signal:</b> {result['band'].upper()}{arrow} {signal_emoji} {result['signal']}\n"
-            f"<b>Time:</b> {ist_time.strftime('%Y-%m-%d %H:%M IST')}\n"
-            f"<b>Close:</b> ${result['close']:.4f}\n"
-            f"<b>Band:</b> ${result['band_value']:.4f}\n"
-            f"<b>Filter:</b> ${result['filter']:.4f}\n"
-            f"<b>Exchange:</b> {result['exchange'].upper()}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"<a href='{chart_link}'>📊 View Chart</a>"
+        return (
+            f"{emoji} <b>{result['coin']}</b> | {result['band'].upper()}{arrow} {signal_emoji}\n"
+            f"  💰 ${result['close']:.4f} | ⏰ {ist_time.strftime('%H:%M IST')}\n"
+            f"  📊 <a href='{chart_link}'>Chart</a> | 🏦 {result['exchange'].upper()}"
         )
-        
-        return message
     
-    def send_alert(self, result):
+    def send_consolidated_alerts(self, alerts, total_coins, failed_count):
         """
-        Send formatted trading alert to Telegram
-        
-        Args:
-            result: Analysis result dict
-        
-        Returns:
-            bool: True if successful
-        """
-        message = self.format_alert(result)
-        return self.send_message(message)
-    
-    def send_summary(self, alerts, total_coins, failed_count):
-        """
-        Send analysis summary to Telegram
+        Send all alerts in ONE consolidated message
         
         Args:
             alerts: List of alert dicts
@@ -114,37 +83,94 @@ class TelegramNotifier:
             bool: True if successful
         """
         if not alerts:
+            # No signals detected
             message = (
                 f"📊 <b>Gaussian Channel 15m Analysis</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Coins Analyzed:</b> {total_coins}\n"
-                f"<b>Signals Detected:</b> 0\n"
-                f"<b>Status:</b> No alerts ✅"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔍 Analyzed: {total_coins} coins\n"
+                f"🔔 Signals: 0\n"
+                f"✅ Status: No alerts\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M IST')}"
             )
-        else:
-            hband_up = len([a for a in alerts if a['band'] == 'hband' and a['direction'] == 'from_below'])
-            hband_down = len([a for a in alerts if a['band'] == 'hband' and a['direction'] == 'from_above'])
-            lband_up = len([a for a in alerts if a['band'] == 'lband' and a['direction'] == 'from_below'])
-            lband_down = len([a for a in alerts if a['band'] == 'lband' and a['direction'] == 'from_above'])
-            
-            message = (
-                f"📊 <b>Gaussian Channel 15m Analysis</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Coins Analyzed:</b> {total_coins}\n"
-                f"<b>Signals Detected:</b> {len(alerts)}\n"
-                f"<b>Failed:</b> {failed_count}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Breakdown:</b>\n"
-                f"  🔴 HBand ↑: {hband_up}\n"
-                f"  🔴 HBand ↓: {hband_down}\n"
-                f"  🔵 LBand ↓: {lband_down}\n"
-                f"  🔵 LBand ↑: {lband_up}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"<i>Time: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</i>"
-            )
+            return self.send_message(message)
+        
+        # Calculate breakdown
+        hband_up = len([a for a in alerts if a['band'] == 'hband' and a['direction'] == 'from_below'])
+        hband_down = len([a for a in alerts if a['band'] == 'hband' and a['direction'] == 'from_above'])
+        lband_up = len([a for a in alerts if a['band'] == 'lband' and a['direction'] == 'from_below'])
+        lband_down = len([a for a in alerts if a['band'] == 'lband' and a['direction'] == 'from_above'])
+        
+        # Build consolidated message
+        message = (
+            f"📊 <b>Gaussian Channel 15m Analysis</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔍 Analyzed: {total_coins} coins\n"
+            f"🔔 Signals: {len(alerts)}\n"
+            f"❌ Failed: {failed_count}\n\n"
+        )
+        
+        # Add breakdown
+        message += f"<b>📈 Breakdown:</b>\n"
+        if hband_up > 0:
+            message += f"  🔴 HBand ↑: {hband_up}\n"
+        if hband_down > 0:
+            message += f"  🔴 HBand ↓: {hband_down}\n"
+        if lband_down > 0:
+            message += f"  🔵 LBand ↓: {lband_down}\n"
+        if lband_up > 0:
+            message += f"  🔵 LBand ↑: {lband_up}\n"
+        
+        message += f"\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        message += f"<b>🚨 ALERTS:</b>\n\n"
+        
+        # Add all alerts
+        for i, alert in enumerate(alerts, 1):
+            message += f"{i}. {self.format_single_alert(alert)}\n\n"
+        
+        # Add footer
+        current_time = datetime.now()
+        ist_time = current_time + pd.Timedelta(hours=5, minutes=30)
+        message += f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        message += f"⏰ {ist_time.strftime('%Y-%m-%d %H:%M IST')}"
+        
+        # Split message if too long (Telegram limit: 4096 characters)
+        if len(message) > 4000:
+            # Send in chunks
+            return self._send_long_message(message)
         
         return self.send_message(message)
-
-
-# Fix import
-import pandas as pd
+    
+    def _send_long_message(self, message):
+        """Split and send long messages"""
+        max_length = 4000
+        parts = []
+        
+        # Split by alerts
+        lines = message.split('\n\n')
+        current_part = ""
+        
+        for line in lines:
+            if len(current_part) + len(line) + 2 < max_length:
+                current_part += line + "\n\n"
+            else:
+                if current_part:
+                    parts.append(current_part)
+                current_part = line + "\n\n"
+        
+        if current_part:
+            parts.append(current_part)
+        
+        # Send all parts
+        success = True
+        for i, part in enumerate(parts):
+            if i == 0:
+                sent = self.send_message(part)
+            else:
+                # Add continuation header
+                cont_msg = f"<b>📊 Continued... (Part {i+1})</b>\n\n{part}"
+                sent = self.send_message(cont_msg)
+            
+            if not sent:
+                success = False
+        
+        return success
