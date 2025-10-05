@@ -1,6 +1,6 @@
 """
 Run Gaussian Channel 15-Minute Analysis on Multiple Coins
-Sends alerts to Telegram
+Sends consolidated Telegram alert with all signals
 """
 
 import os
@@ -82,15 +82,6 @@ def main():
                 print("✅ SIGNAL DETECTED")
                 print(format_console_alert(result))
                 print()
-                
-                # Send Telegram alert immediately
-                if telegram_enabled:
-                    success = telegram.send_alert(result)
-                    if success:
-                        print("   ✓ Telegram alert sent")
-                    else:
-                        print("   ✗ Telegram alert failed")
-                    print()
             else:
                 print("⚪ No signal")
                 
@@ -126,14 +117,14 @@ def main():
     if failed_coins:
         print(f"\n⚠️  Failed Coins: {', '.join(failed_coins)}")
     
-    # Send summary to Telegram
+    # Send ONE consolidated Telegram message with all alerts
     if telegram_enabled:
-        print("\n📤 Sending summary to Telegram...")
-        success = telegram.send_summary(alerts, len(coins), len(failed_coins))
+        print("\n📤 Sending consolidated alert to Telegram...")
+        success = telegram.send_consolidated_alerts(alerts, len(coins), len(failed_coins))
         if success:
-            print("   ✓ Summary sent successfully")
+            print("   ✓ Telegram message sent successfully")
         else:
-            print("   ✗ Summary failed to send")
+            print("   ✗ Telegram message failed to send")
     
     print("\n" + "="*80)
     print(f"End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
