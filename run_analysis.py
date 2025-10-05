@@ -1,11 +1,12 @@
 """
 Run Gaussian Channel 15-Minute Analysis on Multiple Coins
-Reads coins from coins.txt and analyzes each coin
+Sends alerts to Telegram
 """
 
 import os
 from datetime import datetime
 from gaussian_channel_15m_analyzer import GaussianChannel15mAnalyzer
+from telegram_notifier import TelegramNotifier
 
 
 def load_coins(filename='coins.txt'):
@@ -20,8 +21,8 @@ def load_coins(filename='coins.txt'):
     return coins
 
 
-def format_alert(result):
-    """Format alert message"""
+def format_console_alert(result):
+    """Format alert message for console"""
     arrow = '↑' if result['direction'] == 'from_below' else '↓'
     band_emoji = '🔴' if result['band'] == 'hband' else '🔵'
     
@@ -38,8 +39,18 @@ def main():
     print("="*80)
     print("GAUSSIAN CHANNEL 15-MINUTE ANALYSIS")
     print("="*80)
-    print(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("="*80 + "\n")
+    
+    # Initialize Telegram notifier
+    telegram = TelegramNotifier()
+    telegram_enabled = telegram.is_configured()
+    
+    if telegram_enabled:
+        print("✅ Telegram notifications enabled")
+    else:
+        print("⚠️  Telegram notifications disabled (credentials not found)")
+    print()
     
     # Load coins
     coins = load_coins('coins.txt')
@@ -69,8 +80,17 @@ def main():
             if result:
                 alerts.append(result)
                 print("✅ SIGNAL DETECTED")
-                print(format_alert(result))
+                print(format_console_alert(result))
                 print()
+                
+                # Send Telegram alert immediately
+                if telegram_enabled:
+                    success = telegram.send_alert(result)
+                    if success:
+                        print("   ✓ Telegram alert sent")
+                    else:
+                        print("   ✗ Telegram alert failed")
+                    print()
             else:
                 print("⚪ No signal")
                 
@@ -100,14 +120,23 @@ def main():
         
         print(f"\n🔔 ALERTS:")
         for alert in alerts:
-            print(format_alert(alert))
+            print(format_console_alert(alert))
             print()
     
     if failed_coins:
         print(f"\n⚠️  Failed Coins: {', '.join(failed_coins)}")
     
-    print("="*80)
-    print(f"End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # Send summary to Telegram
+    if telegram_enabled:
+        print("\n📤 Sending summary to Telegram...")
+        success = telegram.send_summary(alerts, len(coins), len(failed_coins))
+        if success:
+            print("   ✓ Summary sent successfully")
+        else:
+            print("   ✗ Summary failed to send")
+    
+    print("\n" + "="*80)
+    print(f"End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("="*80)
 
 
