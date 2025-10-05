@@ -4,14 +4,7 @@ on:
   schedule:
     # Run every 15 minutes
     - cron: '*/15 * * * *'
-  
-  # Allow manual trigger from Actions tab
-  workflow_dispatch:
-  
-  # Trigger on push to main branch (for testing)
-  push:
-    branches:
-      - main
+  workflow_dispatch:  # Manual trigger button in Actions tab
 
 jobs:
   analyze:
@@ -36,13 +29,4 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python run_analysis.py
-      
-      - name: Upload logs (if failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: analysis-logs
-          path: '*.log'
-          retention-days: 7
+        run: python run_analysis.py
