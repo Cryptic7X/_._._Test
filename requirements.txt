@@ -1,5 +1,4 @@
 ccxt==4.3.74
 pandas==2.2.2
 numpy==1.26.4
-
-
+requests==2.31.0
