@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
 
 def calculate_rsi(close, length=14):
     """Calculate RSI indicator"""
@@ -115,21 +116,58 @@ def calculate_parabolic_rsi(df, rsi_length=14, sar_start=0.02, sar_increment=0.0
     
     return df
 
-def detect_strong_signals(df, upper_threshold=70, lower_threshold=30):
+def is_bar_confirmed(timestamp, timeframe='30m'):
     """
-    Detect Strong Signals (Big Diamonds) only:
+    Check if a bar is confirmed (closed) based on timestamp
+    For 30m timeframe, bar is confirmed if timestamp is more than 30 minutes old
+    """
+    timeframe_minutes = {
+        '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
+        '1h': 60, '2h': 120, '4h': 240, '6h': 360, '8h': 480, '12h': 720,
+        '1d': 1440
+    }
+    
+    minutes = timeframe_minutes.get(timeframe, 30)
+    now = datetime.utcnow()
+    
+    # Convert timestamp to datetime if it's not already
+    if isinstance(timestamp, pd.Timestamp):
+        bar_time = timestamp.to_pydatetime()
+    else:
+        bar_time = timestamp
+    
+    # Bar is confirmed if it's older than the timeframe duration
+    time_diff = (now - bar_time.replace(tzinfo=None)).total_seconds() / 60
+    
+    return time_diff >= minutes
+
+def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe='30m'):
+    """
+    Detect Strong Signals (Big Diamonds) only on CONFIRMED bars:
     - Strong Buy: SAR flips to bullish (is_below=True) AND SAR <= lower_threshold (30)
     - Strong Sell: SAR flips to bearish (is_below=False) AND SAR >= upper_threshold (70)
     
     This matches the Pine Script conditions:
     s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
     s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
+    
+    IMPORTANT: Only checks CONFIRMED (closed) bars, not the currently forming bar
     """
-    if len(df) < 2:
+    if len(df) < 3:
         return []
     
-    latest = df.iloc[-1]
-    previous = df.iloc[-2]
+    # Check if last bar is confirmed
+    last_bar_confirmed = is_bar_confirmed(df.iloc[-1]['timestamp'], timeframe)
+    
+    # If last bar is not confirmed, check the second-to-last bar (which is definitely confirmed)
+    if last_bar_confirmed:
+        # Last bar is confirmed, use it
+        latest = df.iloc[-1]
+        previous = df.iloc[-2]
+    else:
+        # Last bar is still forming, use second-to-last bar (confirmed)
+        latest = df.iloc[-2]
+        previous = df.iloc[-3]
     
     signals = []
     
@@ -137,12 +175,20 @@ def detect_strong_signals(df, upper_threshold=70, lower_threshold=30):
     if pd.isna(latest['sar']) or pd.isna(previous['sar']):
         return signals
     
-    # Strong Bullish Signal: SAR flips to bullish AND SAR <= 30
-    if latest['is_below'] != previous['is_below'] and latest['is_below'] and latest['sar'] <= lower_threshold:
+    # Check if there was a SAR direction flip on this confirmed bar
+    sar_flipped = latest['is_below'] != previous['is_below']
+    
+    if not sar_flipped:
+        return signals
+    
+    # Strong Bullish Signal: SAR flipped to bullish AND SAR <= 30
+    # Matches: s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
+    if latest['is_below'] and latest['sar'] <= lower_threshold:
         signals.append('STRONG_BUY')
     
-    # Strong Bearish Signal: SAR flips to bearish AND SAR >= 70
-    if latest['is_below'] != previous['is_below'] and not latest['is_below'] and latest['sar'] >= upper_threshold:
+    # Strong Bearish Signal: SAR flipped to bearish AND SAR >= 70
+    # Matches: s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
+    if not latest['is_below'] and latest['sar'] >= upper_threshold:
         signals.append('STRONG_SELL')
     
     return signals
