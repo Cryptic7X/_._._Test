@@ -28,6 +28,25 @@ def load_coins(filename='coins.txt'):
         print(f"Error: {filename} not found!")
         return []
 
+def create_chart_links(symbol, timeframe='30m'):
+    """Create TradingView and CoinGlass links"""
+    # Convert timeframe to minutes
+    timeframe_map = {
+        '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
+        '1h': 60, '2h': 120, '4h': 240, '6h': 360, '8h': 480, '12h': 720,
+        '1d': 1440, '1w': 10080
+    }
+    timeframe_minutes = timeframe_map.get(timeframe, 30)
+    
+    # Clean symbol (remove /USDT or /USD)
+    clean_symbol = symbol.replace('/USDT', '').replace('/USD', '').replace('/', '')
+    
+    # Create links
+    tv_link = f"https://www.tradingview.com/chart/?symbol={clean_symbol}USDT&interval={timeframe_minutes}"
+    cg_link = f"https://www.coinglass.com/pro/futures/LiquidationHeatMapNew?coin={clean_symbol}"
+    
+    return tv_link, cg_link
+
 def scan_coins(symbols, timeframe):
     """Scan all coins for Parabolic RSI strong signals"""
     alerts = []
@@ -61,13 +80,17 @@ def scan_coins(symbols, timeframe):
             
             if signals:
                 latest = df.iloc[-1]
+                tv_link, cg_link = create_chart_links(symbol, timeframe)
+                
                 alerts.append({
                     'symbol': symbol,
                     'signals': signals,
                     'rsi': latest['rsi'],
                     'sar': latest['sar'],
                     'price': latest['close'],
-                    'timestamp': latest['timestamp']
+                    'timestamp': latest['timestamp'],
+                    'tv_link': tv_link,
+                    'cg_link': cg_link
                 })
                 print(f"  ✓ Signal detected: {signals}")
             else:
@@ -98,6 +121,8 @@ def format_alert_message(alerts):
         message += f"RSI: <code>{alert['rsi']:.2f}</code>\n"
         message += f"SAR: <code>{alert['sar']:.2f}</code>\n"
         message += f"Price: <code>${alert['price']:.6f}</code>\n"
+        message += f"📈 <a href=\"{alert['tv_link']}\">TradingView Chart</a>\n"
+        message += f"🔥 <a href=\"{alert['cg_link']}\">CoinGlass Liquidations</a>\n"
         message += f"\n"
     
     message += f"━━━━━━━━━━━━━━━━━━━━\n"
