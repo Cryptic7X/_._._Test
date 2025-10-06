@@ -141,9 +141,27 @@ def is_bar_confirmed(timestamp, timeframe='30m'):
     
     return time_diff >= minutes
 
-def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe='30m'):
+def is_signal_fresh(timestamp, freshness_minutes=60):
     """
-    Detect Strong Signals (Big Diamonds) only on CONFIRMED bars:
+    Check if signal is fresh (within freshness window)
+    Default: 60 minutes (1 hour)
+    """
+    now = datetime.utcnow()
+    
+    # Convert timestamp to datetime if it's not already
+    if isinstance(timestamp, pd.Timestamp):
+        signal_time = timestamp.to_pydatetime()
+    else:
+        signal_time = timestamp
+    
+    # Calculate age in minutes
+    age_minutes = (now - signal_time.replace(tzinfo=None)).total_seconds() / 60
+    
+    return age_minutes <= freshness_minutes
+
+def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe='30m', freshness_minutes=60):
+    """
+    Detect Strong Signals (Big Diamonds) only on CONFIRMED and FRESH bars:
     - Strong Buy: SAR flips to bullish (is_below=True) AND SAR <= lower_threshold (30)
     - Strong Sell: SAR flips to bearish (is_below=False) AND SAR >= upper_threshold (70)
     
@@ -151,7 +169,9 @@ def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe=
     s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
     s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
     
-    IMPORTANT: Only checks CONFIRMED (closed) bars, not the currently forming bar
+    IMPORTANT: 
+    - Only checks CONFIRMED (closed) bars, not the currently forming bar
+    - Only returns signals that are FRESH (within freshness_minutes window)
     """
     if len(df) < 3:
         return []
@@ -168,6 +188,10 @@ def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe=
         # Last bar is still forming, use second-to-last bar (confirmed)
         latest = df.iloc[-2]
         previous = df.iloc[-3]
+    
+    # Check if signal is fresh (within freshness window)
+    if not is_signal_fresh(latest['timestamp'], freshness_minutes):
+        return []  # Signal is too old, ignore it
     
     signals = []
     
