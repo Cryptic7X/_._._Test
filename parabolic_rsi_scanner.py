@@ -1,0 +1,149 @@
+import os
+import ccxt
+import pandas as pd
+from datetime import datetime
+from indicators import calculate_parabolic_rsi, detect_strong_signals
+from data_fetcher import fetch_ohlcv_multi_exchange
+from telegram_alerts import send_telegram_message
+
+# Configuration
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TIMEFRAME = '30m'
+RSI_LENGTH = 14
+SAR_START = 0.02
+SAR_INCREMENT = 0.02
+SAR_MAX = 0.2
+UPPER_THRESHOLD = 70
+LOWER_THRESHOLD = 30
+
+def load_coins(filename='coins.txt'):
+    """Load coin symbols from text file"""
+    try:
+        with open(filename, 'r') as f:
+            coins = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        print(f"Loaded {len(coins)} coins from {filename}")
+        return coins
+    except FileNotFoundError:
+        print(f"Error: {filename} not found!")
+        return []
+
+def scan_coins(symbols, timeframe):
+    """Scan all coins for Parabolic RSI strong signals"""
+    alerts = []
+    
+    for symbol in symbols:
+        try:
+            print(f"Analyzing {symbol}...")
+            
+            # Fetch OHLCV data from multiple exchanges
+            df = fetch_ohlcv_multi_exchange(symbol, timeframe, limit=100)
+            
+            if df is None or len(df) < 50:
+                print(f"  ⚠ Insufficient data for {symbol}")
+                continue
+            
+            # Calculate Parabolic RSI indicator
+            df = calculate_parabolic_rsi(
+                df, 
+                rsi_length=RSI_LENGTH,
+                sar_start=SAR_START,
+                sar_increment=SAR_INCREMENT,
+                sar_max=SAR_MAX
+            )
+            
+            # Detect strong signals only (Big Diamonds)
+            signals = detect_strong_signals(
+                df, 
+                upper_threshold=UPPER_THRESHOLD,
+                lower_threshold=LOWER_THRESHOLD
+            )
+            
+            if signals:
+                latest = df.iloc[-1]
+                alerts.append({
+                    'symbol': symbol,
+                    'signals': signals,
+                    'rsi': latest['rsi'],
+                    'sar': latest['sar'],
+                    'price': latest['close'],
+                    'timestamp': latest['timestamp']
+                })
+                print(f"  ✓ Signal detected: {signals}")
+            else:
+                print(f"  - No signals")
+                
+        except Exception as e:
+            print(f"  ✗ Error processing {symbol}: {str(e)}")
+            continue
+    
+    return alerts
+
+def format_alert_message(alerts):
+    """Format alerts for Telegram"""
+    if not alerts:
+        return None
+    
+    message = f"🔔 <b>Parabolic RSI Strong Signals</b>\n"
+    message += f"📊 Timeframe: <b>{TIMEFRAME}</b>\n"
+    message += f"⏰ Time: <b>{datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}</b>\n"
+    message += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    for alert in alerts:
+        signal_emoji = "🔴" if 'STRONG_SELL' in alert['signals'] else "🟢"
+        signal_text = "STRONG SELL" if 'STRONG_SELL' in alert['signals'] else "STRONG BUY"
+        
+        message += f"{signal_emoji} <b>{alert['symbol']}</b>\n"
+        message += f"Signal: <b>{signal_text}</b>\n"
+        message += f"RSI: <code>{alert['rsi']:.2f}</code>\n"
+        message += f"SAR: <code>{alert['sar']:.2f}</code>\n"
+        message += f"Price: <code>${alert['price']:.6f}</code>\n"
+        message += f"\n"
+    
+    message += f"━━━━━━━━━━━━━━━━━━━━\n"
+    message += f"Total Signals: <b>{len(alerts)}</b>"
+    
+    return message
+
+def main():
+    """Main scanner function"""
+    print("=" * 60)
+    print("Parabolic RSI Scanner - Strong Signals Only")
+    print(f"Timeframe: {TIMEFRAME}")
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
+    print("=" * 60)
+    
+    # Load coins from file
+    symbols = load_coins('coins.txt')
+    
+    if not symbols:
+        print("No coins to scan!")
+        return
+    
+    # Scan all coins
+    alerts = scan_coins(symbols, TIMEFRAME)
+    
+    # Send Telegram alert if signals found
+    if alerts:
+        print(f"\n✓ Found {len(alerts)} strong signal(s)!")
+        message = format_alert_message(alerts)
+        
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            success = send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+            if success:
+                print("✓ Telegram alert sent successfully!")
+            else:
+                print("✗ Failed to send Telegram alert")
+        else:
+            print("⚠ Telegram credentials not configured")
+            print("\nMessage preview:")
+            print(message)
+    else:
+        print("\n- No strong signals detected")
+    
+    print("\n" + "=" * 60)
+    print("Scan completed!")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
