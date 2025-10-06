@@ -16,6 +16,7 @@ SAR_INCREMENT = 0.02
 SAR_MAX = 0.2
 UPPER_THRESHOLD = 70
 LOWER_THRESHOLD = 30
+FRESHNESS_MINUTES = 60  # Only alert on signals within last 60 minutes (1 hour)
 
 def load_coins(filename='coins.txt'):
     """Load coin symbols from text file"""
@@ -71,16 +72,21 @@ def scan_coins(symbols, timeframe):
                 sar_max=SAR_MAX
             )
             
-            # Detect strong signals only (Big Diamonds)
+            # Detect strong signals only (Big Diamonds) with freshness check
             signals = detect_strong_signals(
                 df, 
                 upper_threshold=UPPER_THRESHOLD,
-                lower_threshold=LOWER_THRESHOLD
+                lower_threshold=LOWER_THRESHOLD,
+                timeframe=timeframe,
+                freshness_minutes=FRESHNESS_MINUTES  # Add freshness parameter
             )
             
             if signals:
                 latest = df.iloc[-1]
                 tv_link, cg_link = create_chart_links(symbol, timeframe)
+                
+                # Calculate signal age for display
+                signal_age_minutes = (datetime.utcnow() - latest['timestamp'].to_pydatetime().replace(tzinfo=None)).total_seconds() / 60
                 
                 alerts.append({
                     'symbol': symbol,
@@ -89,12 +95,13 @@ def scan_coins(symbols, timeframe):
                     'sar': latest['sar'],
                     'price': latest['close'],
                     'timestamp': latest['timestamp'],
+                    'signal_age_minutes': signal_age_minutes,
                     'tv_link': tv_link,
                     'cg_link': cg_link
                 })
-                print(f"  ✓ Signal detected: {signals}")
+                print(f"  ✓ Signal detected: {signals} (Age: {signal_age_minutes:.1f} min)")
             else:
-                print(f"  - No signals")
+                print(f"  - No fresh signals")
                 
         except Exception as e:
             print(f"  ✗ Error processing {symbol}: {str(e)}")
@@ -116,8 +123,15 @@ def format_alert_message(alerts):
         signal_emoji = "🔴" if 'STRONG_SELL' in alert['signals'] else "🟢"
         signal_text = "STRONG SELL" if 'STRONG_SELL' in alert['signals'] else "STRONG BUY"
         
+        # Format signal age
+        age_min = alert['signal_age_minutes']
+        if age_min < 60:
+            age_text = f"{age_min:.0f}m ago"
+        else:
+            age_text = f"{age_min/60:.1f}h ago"
+        
         message += f"{signal_emoji} <b>{alert['symbol']}</b>\n"
-        message += f"Signal: <b>{signal_text}</b>\n"
+        message += f"Signal: <b>{signal_text}</b> ({age_text})\n"
         message += f"RSI: <code>{alert['rsi']:.2f}</code>\n"
         message += f"SAR: <code>{alert['sar']:.2f}</code>\n"
         message += f"Price: <code>${alert['price']:.6f}</code>\n"
@@ -135,6 +149,7 @@ def main():
     print("=" * 60)
     print("Parabolic RSI Scanner - Strong Signals Only")
     print(f"Timeframe: {TIMEFRAME}")
+    print(f"Freshness Window: {FRESHNESS_MINUTES} minutes")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}")
     print("=" * 60)
     
@@ -150,7 +165,7 @@ def main():
     
     # Send Telegram alert if signals found
     if alerts:
-        print(f"\n✓ Found {len(alerts)} strong signal(s)!")
+        print(f"\n✓ Found {len(alerts)} fresh signal(s)!")
         message = format_alert_message(alerts)
         
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
@@ -164,7 +179,7 @@ def main():
             print("\nMessage preview:")
             print(message)
     else:
-        print("\n- No strong signals detected")
+        print("\n- No fresh signals detected")
     
     print("\n" + "=" * 60)
     print("Scan completed!")
