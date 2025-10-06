@@ -1,32 +1,33 @@
-name: Gaussian Channel 15m Analysis
+name: Parabolic RSI Scanner
 
 on:
   schedule:
-    # Run every 15 minutes
-    - cron: '*/15 * * * *'
-  workflow_dispatch:  # Manual trigger button in Actions tab
+    # Run every 30 minutes (aligned with 30m timeframe)
+    - cron: '*/30 * * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
-  analyze:
+  scan:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Run Gaussian Channel Analysis
+      - name: Run Parabolic RSI Scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python run_analysis.py
+        run: python parabolic_rsi_scanner.py
