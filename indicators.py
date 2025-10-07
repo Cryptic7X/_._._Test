@@ -161,17 +161,17 @@ def is_signal_fresh(timestamp, freshness_minutes=60):
 
 def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe='30m', freshness_minutes=60):
     """
-    Detect Strong Signals (Big Diamonds) only on CONFIRMED and FRESH bars:
-    - Strong Buy: SAR flips to bullish (is_below=True) AND SAR <= lower_threshold (30)
-    - Strong Sell: SAR flips to bearish (is_below=False) AND SAR >= upper_threshold (70)
+    Detect ONLY Strong Signals (BIG Diamonds) on confirmed and fresh bars.
     
-    This matches the Pine Script conditions:
+    Pine Script conditions (EXACT MATCH):
     s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
     s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
     
-    IMPORTANT: 
-    - Only checks CONFIRMED (closed) bars, not the currently forming bar
-    - Only returns signals that are FRESH (within freshness_minutes window)
+    Regular signals (small diamonds) are:
+    sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed
+    sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed
+    
+    The ONLY difference is the threshold check: sar_rsi <= 30 or sar_rsi >= 70
     """
     if len(df) < 3:
         return []
@@ -196,23 +196,33 @@ def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe=
     signals = []
     
     # Check if we have valid data
-    if pd.isna(latest['sar']) or pd.isna(previous['sar']):
+    if pd.isna(latest['sar']) or pd.isna(previous['sar']) or pd.isna(latest['rsi']):
         return signals
     
     # Check if there was a SAR direction flip on this confirmed bar
     sar_flipped = latest['is_below'] != previous['is_below']
     
     if not sar_flipped:
-        return signals
+        return signals  # No flip, no signal at all
     
-    # Strong Bullish Signal: SAR flipped to bullish AND SAR <= 30
-    # Matches: s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
+    # CRITICAL: Check threshold conditions for STRONG signals only
+    # Strong Bullish Signal: SAR flipped to bullish (is_below=True) AND SAR value is <= 30
+    # Pine Script: s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
     if latest['is_below'] and latest['sar'] <= lower_threshold:
+        print(f"    DEBUG: STRONG BUY - SAR flipped to bullish, SAR={latest['sar']:.2f} <= {lower_threshold}")
         signals.append('STRONG_BUY')
     
-    # Strong Bearish Signal: SAR flipped to bearish AND SAR >= 70
-    # Matches: s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
+    # Strong Bearish Signal: SAR flipped to bearish (is_below=False) AND SAR value is >= 70
+    # Pine Script: s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
     if not latest['is_below'] and latest['sar'] >= upper_threshold:
+        print(f"    DEBUG: STRONG SELL - SAR flipped to bearish, SAR={latest['sar']:.2f} >= {upper_threshold}")
         signals.append('STRONG_SELL')
+    
+    # If SAR flipped but threshold not met, this is a SMALL diamond (which we ignore)
+    if sar_flipped and not signals:
+        if latest['is_below']:
+            print(f"    DEBUG: Small diamond (bullish flip) - SAR={latest['sar']:.2f} > {lower_threshold} (not strong)")
+        else:
+            print(f"    DEBUG: Small diamond (bearish flip) - SAR={latest['sar']:.2f} < {upper_threshold} (not strong)")
     
     return signals
