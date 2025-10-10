@@ -21,13 +21,44 @@ jobs:
         with:
           python-version: '3.11'
       
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
+      - name: Load alert history
+        id: load-history
+        continue-on-error: true
+        run: |
+          if [ -f alert_history.json ]; then
+            echo "Alert history file exists"
+          else
+            echo '{"_info": "Alert history initialized"}' > alert_history.json
+            echo "Created new alert history file"
+          fi
+      
       - name: Run Parabolic RSI Scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python parabolic_rsi_scanner.py
+        run: |
+          echo "Starting scanner at $(date)"
+          python parabolic_rsi_scanner.py
+          echo "Scanner completed at $(date)"
+      
+      - name: Commit and push alert history
+        continue-on-error: true
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add alert_history.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update alert history [skip ci]"
+          git push
