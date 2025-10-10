@@ -1,9 +1,6 @@
 # Environment files
 .env
 
-# Alert history (contains timestamps, regenerated each run)
-alert_history.json
-
 # Python cache
 __pycache__/
 *.pyc
@@ -16,3 +13,5 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Note: alert_history.json is tracked to persist between GitHub Actions runs
