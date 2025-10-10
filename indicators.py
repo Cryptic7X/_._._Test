@@ -116,113 +116,136 @@ def calculate_parabolic_rsi(df, rsi_length=14, sar_start=0.02, sar_increment=0.0
     
     return df
 
-def is_bar_confirmed(timestamp, timeframe='30m'):
+def detect_all_signals(df, upper_threshold=70, lower_threshold=30):
     """
-    Check if a bar is confirmed (closed) based on timestamp
-    For 30m timeframe, bar is confirmed if timestamp is more than 30 minutes old
+    Detect ALL Parabolic RSI signals (both regular and strong) exactly as in Pine Script:
+    
+    Regular Signals (Small Diamonds):
+    - sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed  
+    - sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed
+    
+    Strong Signals (Big Diamonds):
+    - s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
+    - s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
+    
+    Chart Signals (what appears on price chart):
+    - Chart Strong Rsi Up = s_sig_up
+    - Chart Strong Rsi Dn = s_sig_dn  
+    - Chart Rsi Up = sig_up and sar_rsi >= lower_
+    - Chart Rsi Dn = sig_dn and sar_rsi <= upper_
     """
-    timeframe_minutes = {
-        '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
-        '1h': 60, '2h': 120, '4h': 240, '6h': 360, '8h': 480, '12h': 720,
-        '1d': 1440
-    }
-    
-    minutes = timeframe_minutes.get(timeframe, 30)
-    now = datetime.utcnow()
-    
-    # Convert timestamp to datetime if it's not already
-    if isinstance(timestamp, pd.Timestamp):
-        bar_time = timestamp.to_pydatetime()
-    else:
-        bar_time = timestamp
-    
-    # Bar is confirmed if it's older than the timeframe duration
-    time_diff = (now - bar_time.replace(tzinfo=None)).total_seconds() / 60
-    
-    return time_diff >= minutes
-
-def is_signal_fresh(timestamp, freshness_minutes=60):
-    """
-    Check if signal is fresh (within freshness window)
-    Default: 60 minutes (1 hour)
-    """
-    now = datetime.utcnow()
-    
-    # Convert timestamp to datetime if it's not already
-    if isinstance(timestamp, pd.Timestamp):
-        signal_time = timestamp.to_pydatetime()
-    else:
-        signal_time = timestamp
-    
-    # Calculate age in minutes
-    age_minutes = (now - signal_time.replace(tzinfo=None)).total_seconds() / 60
-    
-    return age_minutes <= freshness_minutes
-
-def detect_strong_signals(df, upper_threshold=70, lower_threshold=30, timeframe='30m', freshness_minutes=60):
-    """
-    Detect ONLY Strong Signals (BIG Diamonds) on confirmed and fresh bars.
-    
-    Pine Script conditions (EXACT MATCH):
-    s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
-    s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
-    
-    Regular signals (small diamonds) are:
-    sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed
-    sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed
-    
-    The ONLY difference is the threshold check: sar_rsi <= 30 or sar_rsi >= 70
-    """
-    if len(df) < 3:
+    if len(df) < 2:
         return []
     
-    # Check if last bar is confirmed
-    last_bar_confirmed = is_bar_confirmed(df.iloc[-1]['timestamp'], timeframe)
-    
-    # If last bar is not confirmed, check the second-to-last bar (which is definitely confirmed)
-    if last_bar_confirmed:
-        # Last bar is confirmed, use it
-        latest = df.iloc[-1]
-        previous = df.iloc[-2]
-    else:
-        # Last bar is still forming, use second-to-last bar (confirmed)
-        latest = df.iloc[-2]
-        previous = df.iloc[-3]
-    
-    # Check if signal is fresh (within freshness window)
-    if not is_signal_fresh(latest['timestamp'], freshness_minutes):
-        return []  # Signal is too old, ignore it
+    latest = df.iloc[-1]
+    previous = df.iloc[-2]
     
     signals = []
     
     # Check if we have valid data
-    if pd.isna(latest['sar']) or pd.isna(previous['sar']) or pd.isna(latest['rsi']):
+    if pd.isna(latest['sar']) or pd.isna(previous['sar']):
         return signals
     
-    # Check if there was a SAR direction flip on this confirmed bar
+    # Check for SAR direction flip (equivalent to barstate.isconfirmed)
     sar_flipped = latest['is_below'] != previous['is_below']
     
     if not sar_flipped:
-        return signals  # No flip, no signal at all
+        return signals
     
-    # CRITICAL: Check threshold conditions for STRONG signals only
-    # Strong Bullish Signal: SAR flipped to bullish (is_below=True) AND SAR value is <= 30
-    # Pine Script: s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
-    if latest['is_below'] and latest['sar'] <= lower_threshold:
-        print(f"    DEBUG: STRONG BUY - SAR flipped to bullish, SAR={latest['sar']:.2f} <= {lower_threshold}")
-        signals.append('STRONG_BUY')
+    # Regular Signals (Small Diamonds) - SAR direction flip only
+    if latest['is_below']:  # SAR flipped to bullish
+        # sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed
+        signals.append('REGULAR_BUY')
+        
+        # Strong signal condition: also check if SAR <= 30
+        if latest['sar'] <= lower_threshold:
+            # s_sig_up = isBelow != isBelow[1] and isBelow and barstate.isconfirmed and sar_rsi <= lower_
+            signals.append('STRONG_BUY')
     
-    # Strong Bearish Signal: SAR flipped to bearish (is_below=False) AND SAR value is >= 70
-    # Pine Script: s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
-    if not latest['is_below'] and latest['sar'] >= upper_threshold:
-        print(f"    DEBUG: STRONG SELL - SAR flipped to bearish, SAR={latest['sar']:.2f} >= {upper_threshold}")
-        signals.append('STRONG_SELL')
+    else:  # SAR flipped to bearish  
+        # sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed
+        signals.append('REGULAR_SELL')
+        
+        # Strong signal condition: also check if SAR >= 70
+        if latest['sar'] >= upper_threshold:
+            # s_sig_dn = isBelow != isBelow[1] and not isBelow and barstate.isconfirmed and sar_rsi >= upper_
+            signals.append('STRONG_SELL')
     
-    # If SAR flipped but threshold not met, this is a SMALL diamond (which we ignore)
-    if sar_flipped and not signals:
-        if latest['is_below']:
-            print(f"    DEBUG: Small diamond (bullish flip) - SAR={latest['sar']:.2f} > {lower_threshold} (not strong)")
-        else:
-            print(f"    DEBUG: Small diamond (bearish flip) - SAR={latest['sar']:.2f} < {upper_threshold} (not strong)")
+    # Chart signals (what shows on price chart)
+    chart_signals = []
     
-    return signals
+    if 'STRONG_BUY' in signals:
+        chart_signals.append('CHART_STRONG_BUY')  # Big diamond below bar
+    elif 'REGULAR_BUY' in signals and latest['sar'] >= lower_threshold:
+        chart_signals.append('CHART_REGULAR_BUY')  # Small diamond below bar
+        
+    if 'STRONG_SELL' in signals:
+        chart_signals.append('CHART_STRONG_SELL')  # Big diamond above bar  
+    elif 'REGULAR_SELL' in signals and latest['sar'] <= upper_threshold:
+        chart_signals.append('CHART_REGULAR_SELL')  # Small diamond above bar
+    
+    # Combine all signals
+    all_signals = signals + chart_signals
+    
+    return all_signals
+
+def is_signal_fresh(candle_timestamp, current_time, freshness_window_hours=1):
+    """
+    Check if signal is fresh (within freshness window)
+    Equivalent to barstate.isconfirmed - only alert on completed candles that are recent
+    """
+    if isinstance(candle_timestamp, str):
+        candle_time = datetime.fromisoformat(candle_timestamp.replace('Z', '+00:00'))
+    else:
+        candle_time = pd.to_datetime(candle_timestamp)
+    
+    if isinstance(current_time, str):
+        current_time = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+    elif not isinstance(current_time, datetime):
+        current_time = pd.to_datetime(current_time)
+    
+    # Make timezone-aware if needed
+    if candle_time.tzinfo is None:
+        candle_time = candle_time.replace(tzinfo=None)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=None)
+    
+    time_diff = current_time - candle_time
+    freshness_window = timedelta(hours=freshness_window_hours)
+    
+    return time_diff <= freshness_window
+
+def should_alert(symbol, signals, candle_timestamp, last_alerts_db, current_time):
+    """
+    Determine if we should send alert based on:
+    1. Signal freshness (within 1 hour)
+    2. No duplicate alerts for same symbol+signal combination
+    """
+    if not signals:
+        return False, []
+    
+    # Check freshness
+    if not is_signal_fresh(candle_timestamp, current_time):
+        return False, []
+    
+    # Check for duplicates
+    fresh_signals = []
+    current_time_dt = pd.to_datetime(current_time)
+    
+    for signal in signals:
+        signal_key = f"{symbol}_{signal}"
+        
+        # Check if we've alerted this signal recently (within 2 hours to prevent spam)
+        if signal_key in last_alerts_db:
+            last_alert_time = pd.to_datetime(last_alerts_db[signal_key])
+            time_since_last = current_time_dt - last_alert_time
+            
+            # Don't alert same signal within 2 hours
+            if time_since_last < timedelta(hours=2):
+                continue
+        
+        fresh_signals.append(signal)
+        # Update last alert time
+        last_alerts_db[signal_key] = current_time_dt.isoformat()
+    
+    return len(fresh_signals) > 0, fresh_signals
