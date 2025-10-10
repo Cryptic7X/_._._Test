@@ -1,0 +1,5 @@
+{
+  "_info": "This file tracks alert history to prevent duplicates",
+  "_format": "symbol_signaltype: timestamp",
+  "_note": "File is auto-generated and managed by the scanner"
+}
